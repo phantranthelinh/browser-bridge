@@ -4,6 +4,12 @@ function emptySession(): SessionState {
   return { groupId: null, tabIds: [], borrowedTabIds: [], currentTabId: null, stopped: false };
 }
 
+// Session names such as "constructor" pass the daemon's regex, and all[name] would return what a
+// plain object inherits from Object.prototype instead of a session.
+function own(all: Sessions, name: string): SessionState {
+  return Object.hasOwn(all, name) ? all[name]! : emptySession();
+}
+
 /**
  * Session state in one storage key. Commands of different sessions and tab events run
  * concurrently, so every read-modify-write goes through one promise chain; without it two updates
@@ -19,13 +25,13 @@ export class SessionStore {
   }
 
   async get(name: string): Promise<SessionState> {
-    return (await this.all())[name] ?? emptySession();
+    return own(await this.all(), name);
   }
 
   update(name: string, change: (s: SessionState) => void): Promise<SessionState> {
     return this.exclusive(async () => {
       const all = await this.all();
-      const s = all[name] ?? emptySession();
+      const s = own(all, name);
       change(s);
       all[name] = s;
       await this.area.set({ [KEYS.sessions]: all });

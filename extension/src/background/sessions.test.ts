@@ -61,6 +61,17 @@ describe('SessionStore', () => {
     expect((await store.get('b')).stopped).toBe(false);
   });
 
+  // "constructor" passes the daemon's session regex and is also a key every plain object inherits.
+  it('treats a session named after an Object.prototype key like any other', async () => {
+    const store = new SessionStore(memoryStorage());
+    expect(await store.get('constructor')).toEqual({ groupId: null, tabIds: [], borrowedTabIds: [], currentTabId: null, stopped: false });
+    await store.update('constructor', (s) => {
+      s.tabIds.push(4);
+      s.stopped = true;
+    });
+    expect(await store.get('constructor')).toMatchObject({ tabIds: [4], stopped: true });
+  });
+
   it('removes a session', async () => {
     const store = new SessionStore(memoryStorage());
     await store.update('a', (s) => void s.tabIds.push(1));
