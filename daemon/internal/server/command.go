@@ -78,6 +78,8 @@ func (s *Server) run(ctx context.Context, req protocol.Request) protocol.Respons
 		return resp
 	}
 	switch a.Name {
+	case "screenshot":
+		resp = s.saveScreenshot(req.Session, req.Args, resp)
 	case "close_session":
 		s.queues.Forget(req.Session)
 	}
