@@ -29,7 +29,7 @@ Cả 4 use case chạy được trên Chrome hằng ngày của người dùng (
 - Thao tác bên trong iframe (snapshot chỉ *liệt kê* các frame), `save_as_pdf`, hover.
 - Nhiều trình duyệt kết nối cùng lúc.
 - Recorder/workflow, agent loop.
-- Publish extension lên store (chỉ load unpacked).
+- Publish extension lên store (chỉ load unpacked). Cách phát cho máy khác nằm ở spec installer (`2026-10-06-installer-design.md`).
 - Token xác thực (lý do ở §7).
 - Chính thức hỗ trợ macOS/Linux. Code Go viết portable nhưng chỉ test trên Windows.
 
@@ -106,6 +106,7 @@ daemon/internal/protocol (Go struct + description)
 | `GET /tools` | `[{name, description, inputSchema}]`, dùng được làm function definition cho bất kỳ LLM nào |
 | `GET /status` | Trạng thái daemon và extension (§9.3) |
 | `GET /ws` | WebSocket, chỉ dành cho extension (§6) |
+| `POST /shutdown` | Daemon trả 200, tắt êm và tự xoá `daemon.pid`/`daemon.addr`. Dùng cho `bridge stop`; qua cùng các kiểm tra security như `/command` |
 
 ### 4.1 Request và response
 
@@ -364,6 +365,7 @@ Gồm bốn phần:
 
 ```text
 bin\bridge.exe
+extension\          bản unpacked do install.ps1 cài; đường dẫn cố định nên chỉ Load unpacked một lần
 config.json         {"addr": "127.0.0.1:9876", "blockedHosts": [], "extensionIds": ["<id>"]}
 daemon.pid          daemon.addr          (xoá khi daemon thoát)
 logs\daemon.log     logs\daemon.log.prev
@@ -379,8 +381,8 @@ artifacts\
 |---|---|
 | `serve` | Chạy daemon ở foreground |
 | `start` | Chạy `serve` thành tiến trình detached (`DETACHED_PROCESS` trên Windows), chờ `/status` trả ok rồi in địa chỉ. Đã chạy rồi thì không làm gì |
-| `stop` / `restart` | Tìm daemon qua `daemon.pid` |
-| `status` | In JSON y như `GET /status`. Daemon không chạy thì in `{"running": false, "addr": …}` |
+| `stop` / `restart` | Gọi `POST /shutdown`, chờ tối đa 5 giây cho daemon thoát. Daemon treo thì kill theo `pid` lấy từ `/status`, không bao giờ theo file `daemon.pid` (PID cũ có thể đã thuộc tiến trình khác). Không có daemon nào trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit code 0 khi đã dừng hoặc vốn không chạy |
+| `status` | In JSON y như `GET /status`. Daemon không chạy thì in `{"running": false, "addr": …}`. Exit code 0 khi đang chạy, 1 khi không |
 | `logs [-f] [-n N] [--prev]` | Xem log |
 | `call <action> --session <s> [--json '<args>' \| --json-file <f>] [--timeout ms]` | In envelope ra stdout. Exit code: 0 khi `ok`, 1 khi `ok:false`, 2 khi không kết nối được daemon. Go đọc argv dạng UTF-16 trên Windows nên text tiếng Việt không bị vỡ |
 | `mcp` | MCP server chạy stdio. Tự `start` daemon nếu daemon chưa chạy. Tool tên `browser_<action>`, không có tham số `session` (§6.1). `browser_screenshot` trả cả ảnh (image content của MCP) lẫn text chứa `path` |
@@ -390,7 +392,7 @@ artifacts\
 
 ```json
 {
-  "running": true, "version": "0.1.0", "protocolVersion": 1, "port": 9876, "uptimeSeconds": 120,
+  "running": true, "version": "0.1.0", "protocolVersion": 1, "port": 9876, "pid": 4120, "uptimeSeconds": 120,
   "extension": { "connected": true, "id": "...", "version": "0.1.0", "browser": "chrome" },
   "sessions": 2
 }
