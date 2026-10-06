@@ -2,41 +2,41 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Dựng daemon Go `bridge serve`. Daemon nhận lệnh qua HTTP, validate theo JSON Schema sinh từ Go struct, chạy các kiểm tra security và các kiểm tra không cần trình duyệt, xếp hàng theo session, chuyển lệnh qua WebSocket tới extension, rồi trả envelope chuẩn. Tất cả được test bằng một extension giả viết bằng Go.
+**Goal:** Build the Go daemon `bridge serve`. The daemon receives commands over HTTP, validates them against a JSON Schema generated from Go structs, runs the security checks and the checks that need no browser, queues them per session, forwards them over WebSocket to the extension, and returns a standard envelope. All of it is tested with a fake extension written in Go.
 
-**Architecture:** Package `protocol` là định nghĩa duy nhất của wire format: struct args/result của từng action, frame WebSocket, mã lỗi. JSON Schema (để validate, cho `GET /tools`, và cho file `schema/protocol.schema.json` mà extension dùng sinh type TS) đều được reflect từ đó. `server` gồm middleware security, pipeline `/command` (validate → precheck → hàng đợi session → hub → hậu xử lý), và `Hub` giữ đúng một kết nối extension. `home` lo `~/.browser-bridge`, `session` lo hàng đợi. `fakeext` đóng vai extension trong test.
+**Architecture:** The `protocol` package is the single definition of the wire format: the args/result structs of each action, the WebSocket frames, and the error codes. The JSON Schema (used for validation, for `GET /tools`, and for the `schema/protocol.schema.json` file that the extension uses to generate TS types) is reflected from it. `server` contains the security middleware, the `/command` pipeline (validate → precheck → session queue → hub → post-processing), and the `Hub`, which holds exactly one extension connection. `home` handles `~/.browser-bridge`, and `session` handles the queues. `fakeext` plays the extension in tests.
 
-**Tech Stack:** Go 1.27, `github.com/invopop/jsonschema` v0.14.0 (reflect schema), `github.com/santhosh-tekuri/jsonschema/v6` v6.0.3 (validate), `github.com/coder/websocket` v1.8.15, `log/slog`, `net/http` (ServeMux có method pattern).
+**Tech Stack:** Go 1.27, `github.com/invopop/jsonschema` v0.14.0 (schema reflection), `github.com/santhosh-tekuri/jsonschema/v6` v6.0.3 (validation), `github.com/coder/websocket` v1.8.15, `log/slog`, `net/http` (ServeMux with method patterns).
 
-**Spec:** `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§3, §4, §5, §6.1, §7, §9.1, §9.3, §9.4, §10, §11, §12 phần Go)
+**Spec:** `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§3, §4, §5, §6.1, §7, §9.1, §9.3, §9.4, §10, §11, §12 Go part)
 
-**Không thuộc plan này:** extension (plan 02 trở đi, viết sau khi có kết quả spike), các subcommand `start`/`stop`/`status`/`logs`/`call`/`mcp`/`install-skill`, `SKILL.md` và marker bảng tool trong đó, script `check:gen` ở root (plan này dùng một Go test thay thế cho phía schema).
+**Out of scope for this plan:** the extension (plan 02 onward, written after the spike results are in), the subcommands `start`/`stop`/`status`/`logs`/`call`/`mcp`/`install-skill`, `SKILL.md` and the tool-table marker inside it, the root `check:gen` script (this plan uses a Go test in its place for the schema side).
 
 ## Global Constraints
 
-- Go ≥ 1.27. Module path: `github.com/phantranthelinh/browser-bridge/daemon`, nằm ở `daemon/`. Mọi lệnh Go chạy từ root repo bằng `go -C daemon …`.
-- Chỉ nghe trên `127.0.0.1` hoặc `localhost`. Địa chỉ mặc định `127.0.0.1:9876`. Thứ tự ưu tiên: `--addr` > `config.json` > mặc định.
-- `session` khớp `^[a-z0-9][a-z0-9_-]{0,63}$`.
-- `timeoutMs` tối đa 120000. Mặc định 30000 cho `navigate`/`reload`/`go_back`/`go_forward`, 15000 cho các action còn lại.
-- HTTP status: 400 cho `INVALID_REQUEST`/`UNKNOWN_ACTION`, 403 cho `FORBIDDEN`, 200 cho mọi kết quả còn lại kể cả `ok:false`. Body luôn là envelope `{ok, data?, error?: {code, message, hint?}}`, trừ `GET /tools` (mảng) và `GET /status` (object §9.3).
-- WebSocket: frame tối đa 64 MB; đóng 4409 khi đã có extension kết nối; đóng 4400 khi lệch `protocolVersion`.
+- Go ≥ 1.27. Module path: `github.com/phantranthelinh/browser-bridge/daemon`, located in `daemon/`. Run every Go command from the repo root with `go -C daemon …`.
+- Listen only on `127.0.0.1` or `localhost`. Default address `127.0.0.1:9876`. Precedence: `--addr` > `config.json` > default.
+- `session` matches `^[a-z0-9][a-z0-9_-]{0,63}$`.
+- `timeoutMs` is at most 120000. Default is 30000 for `navigate`/`reload`/`go_back`/`go_forward`, and 15000 for the remaining actions.
+- HTTP status: 400 for `INVALID_REQUEST`/`UNKNOWN_ACTION`, 403 for `FORBIDDEN`, 200 for every other result including `ok:false`. The body is always the envelope `{ok, data?, error?: {code, message, hint?}}`, except `GET /tools` (an array) and `GET /status` (an object, §9.3).
+- WebSocket: frames up to 64 MB; close with 4409 when an extension is already connected; close with 4400 on a `protocolVersion` mismatch.
 - `Version = "0.1.0"`, `ProtocolVersion = 1`.
-- Extension ID mặc định `nfjidhefdgblbbfhnmbcogkbphipngif`, suy ra từ public key trong `extension/manifest-key.txt`.
-- Mô tả tool và message lỗi viết bằng tiếng Anh, để model nhỏ cũng đọc được.
-- Comment trong code: không ghi mã ticket; chỉ viết khi giải thích được điều code không tự nói.
-- Commit theo kiểu repo đang dùng: `feat(daemon): …`, `test(daemon): …`, `docs: …`.
+- The default extension ID is `nfjidhefdgblbbfhnmbcogkbphipngif`, derived from the public key in `extension/manifest-key.txt`.
+- Tool descriptions and error messages are written in English, so that small models can read them too.
+- Comments in code: no ticket codes; write one only when it explains something the code does not say by itself.
+- Commit in the style the repo already uses: `feat(daemon): …`, `test(daemon): …`, `docs: …`.
 
 ## Review Focus
 
-- **`config.json` lưu bằng Notepad (có BOM), gõ sai tên khoá (`blockedHost`), hoặc ghi URL thay cho host (`https://bank.com/`):** người dùng sẽ tưởng site đã bị chặn trong khi nó không bị chặn. Daemon phải từ chối khởi động và nêu tên file. Test: `TestBadConfigIsAnErrorNamingTheFile`, `TestConfigOverridesAndNormalizesHosts` (Task 4).
-- **Host bị chặn được viết lệch:** `BANK.com.`, `www.bank.com`, `bank.com:8443` vẫn phải bị chặn; `bank.com.evil.net` và `notbank.com` thì không. Test: `TestNavigateURLChecks`, `TestFindTabChecks` (Task 8).
-- **Service worker chết mà không đóng socket** (máy sleep, Chrome kill SW): nếu không có idle timeout, kết nối "xác sống" giữ chỗ và SW khởi động lại bị trả 4409 mãi. Test: `TestSilentConnectionIsDroppedSoTheExtensionCanReconnect` (Task 6).
-- **Response tới muộn sau khi đã trả `TIMEOUT`:** response đó không được rơi vào lệnh kế tiếp của session. Test: `TestLateResponseAfterTimeoutIsDropped` (Task 6).
-- **Đường dẫn tương đối cho `screenshot.path` hoặc `upload.files`:** thư mục làm việc của daemon không phải của agent, nên file sẽ nằm ở chỗ agent không bao giờ tìm. Daemon phải trả `INVALID_REQUEST`. Test: `TestScreenshotExplicitPath`, `TestUploadPathChecks` (Task 8).
+- **`config.json` saved with Notepad (with a BOM), a mistyped key name (`blockedHost`), or a URL written in place of a host (`https://bank.com/`):** the user will think the site is blocked when it is not. The daemon must refuse to start and name the file. Tests: `TestBadConfigIsAnErrorNamingTheFile`, `TestConfigOverridesAndNormalizesHosts` (Task 4).
+- **A blocked host written in a different form:** `BANK.com.`, `www.bank.com`, `bank.com:8443` must still be blocked; `bank.com.evil.net` and `notbank.com` must not. Tests: `TestNavigateURLChecks`, `TestFindTabChecks` (Task 8).
+- **A service worker that dies without closing the socket** (machine sleep, Chrome kills the SW): without an idle timeout, a "zombie" connection holds the slot and the restarted SW is answered with 4409 forever. Test: `TestSilentConnectionIsDroppedSoTheExtensionCanReconnect` (Task 6).
+- **A response that arrives late after `TIMEOUT` was already returned:** that response must not fall into the session's next command. Test: `TestLateResponseAfterTimeoutIsDropped` (Task 6).
+- **A relative path for `screenshot.path` or `upload.files`:** the daemon's working directory is not the agent's, so the file would end up where the agent never looks. The daemon must return `INVALID_REQUEST`. Tests: `TestScreenshotExplicitPath`, `TestUploadPathChecks` (Task 8).
 
 ---
 
-### Task 1: Khung repo và envelope của protocol
+### Task 1: Repo skeleton and the protocol envelope
 
 **Files:**
 - Create: `.gitattributes`
@@ -55,20 +55,20 @@
   - `protocol.Error{Code, Message, Hint string}` (implement `error`)
   - `protocol.Fail(code, message, hint string) protocol.Response`
   - `protocol.HTTPStatus(e *protocol.Error) int`
-  - Hằng mã lỗi `protocol.ErrInvalidRequest` … `protocol.ErrInternal`, gồm cả `protocol.ErrForbidden`
+  - Error code constants `protocol.ErrInvalidRequest` … `protocol.ErrInternal`, including `protocol.ErrForbidden`
   - `protocol.ExtensionIDFromKey(b64 string) (string, error)`
 
-- [ ] **Step 1: Cài Go**
+- [ ] **Step 1: Install Go**
 
 ```powershell
 winget install --id GoLang.Go -e
 ```
 
-Mở terminal mới rồi chạy `go version`. Expected: `go version go1.27.x windows/amd64` hoặc mới hơn.
+Open a new terminal and run `go version`. Expected: `go version go1.27.x windows/amd64` or newer.
 
-- [ ] **Step 2: Tạo `.gitattributes` và `.gitignore`**
+- [ ] **Step 2: Create `.gitattributes` and `.gitignore`**
 
-Máy này để `core.autocrlf=true`. Không có `.gitattributes` thì file sinh ra (schema) sẽ bị đổi sang CRLF khi checkout.
+This machine has `core.autocrlf=true`. Without `.gitattributes`, generated files (the schema) would be converted to CRLF on checkout.
 
 `.gitattributes`:
 
@@ -85,26 +85,26 @@ Máy này để `core.autocrlf=true`. Không có `.gitattributes` thì file sinh
 node_modules/
 ```
 
-- [ ] **Step 3: Tạo public key của extension**
+- [ ] **Step 3: Create the extension's public key**
 
-Key này cố định extension ID khi load unpacked (spec §8.1). Chỉ cần public key; Chrome không cần private key cho extension unpacked.
+This key pins the extension ID when loading unpacked (spec §8.1). Only the public key is needed; Chrome does not need the private key for an unpacked extension.
 
-`extension/manifest-key.txt` (một dòng):
+`extension/manifest-key.txt` (one line):
 
 ```text
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr+RhumvfLLC0HpMDXukXg1/91ERQp+2KnS0tfPyqlv66XjACR/SO5g/of7OlfVr2yFAPVS+RJUzE8C4QOjZdiYn/uu+5az5A+uaA6npQJPRIFnryOmFAV4/bH9cbp6Yho+x3sKE2xhrAUXV7ELGROsR9fIgXcayzGVm3LlUoJIeRjHgwWld2ftIIQSvhj0mPfw1llLz8SKIKucX3u0LpVxLn2W0FTNhMBhLIKVqX6lW1AI9FhvWWUlOVA/aVOE9M0sllWtCSPvdnDykXiF+3r2PQVFFWQa1DsGjMX9BzZNft0rs40YFtd0psq2qtN9lnm5ML/PyLljOv3eodhT4igQIDAQAB
 ```
 
-- [ ] **Step 4: Khởi tạo module**
+- [ ] **Step 4: Initialize the module**
 
 ```bash
 mkdir -p daemon/internal/protocol
 go -C daemon mod init github.com/phantranthelinh/browser-bridge/daemon
 ```
 
-Expected: tạo `daemon/go.mod` với dòng `go 1.27.x`.
+Expected: creates `daemon/go.mod` with the line `go 1.27.x`.
 
-- [ ] **Step 5: Viết test fail**
+- [ ] **Step 5: Write the failing test**
 
 `daemon/internal/protocol/protocol_test.go`:
 
@@ -156,12 +156,12 @@ func TestDefaultExtensionIDMatchesManifestKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Chạy test, xác nhận fail**
+- [ ] **Step 6: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/protocol/`
-Expected: FAIL, lỗi compile `undefined: Response`, `undefined: Fail`, …
+Expected: FAIL, compile errors `undefined: Response`, `undefined: Fail`, …
 
-- [ ] **Step 7: Viết `protocol.go`**
+- [ ] **Step 7: Write `protocol.go`**
 
 `daemon/internal/protocol/protocol.go`:
 
@@ -249,7 +249,7 @@ func HTTPStatus(e *Error) int {
 }
 ```
 
-- [ ] **Step 8: Viết `extid.go`**
+- [ ] **Step 8: Write `extid.go`**
 
 `daemon/internal/protocol/extid.go`:
 
@@ -285,7 +285,7 @@ func ExtensionIDFromKey(b64 string) (string, error) {
 }
 ```
 
-- [ ] **Step 9: Chạy test, xác nhận pass**
+- [ ] **Step 9: Run the test, confirm it passes**
 
 Run: `go -C daemon test ./internal/protocol/`
 Expected: `ok  github.com/phantranthelinh/browser-bridge/daemon/internal/protocol`
@@ -299,28 +299,28 @@ git commit -m "feat(daemon): add protocol envelope, error codes and extension id
 
 ---
 
-### Task 2: Action, frame WebSocket và validate theo schema
+### Task 2: Actions, WebSocket frames and schema validation
 
 **Files:**
 - Create: `daemon/internal/protocol/actions.go`
 - Create: `daemon/internal/protocol/frames.go`
 - Create: `daemon/internal/protocol/schema.go`
 - Test: `daemon/internal/protocol/actions_test.go`
-- Modify: `daemon/go.mod`, tạo `daemon/go.sum`
+- Modify: `daemon/go.mod`, create `daemon/go.sum`
 
 **Interfaces:**
 - Consumes: `protocol.Error` (Task 1).
 - Produces:
-  - `protocol.Action{Name, Description string; Args, Result any; DefaultTimeoutMs int}`, `protocol.Actions []protocol.Action` (24 action, theo thứ tự §5), `protocol.Lookup(name string) (protocol.Action, bool)`, `protocol.MaxTimeoutMs = 120000`
-  - Struct args/result cho từng action, ví dụ `protocol.NavigateArgs{URL, NewTab, GroupTitle}`, `protocol.FindTabArgs{URL, Active}`, `protocol.UploadArgs{Selector, Files}`, `protocol.ScreenshotArgs{Format, Quality, Selector, FullPage, Path}`, `protocol.CDPArgs{Method, Params}`, `protocol.ScreenshotCapture{Data, MimeType, Width, Height}` (extension gửi về), `protocol.ScreenshotResult{Path, SizeBytes, MimeType, Width, Height}` (agent nhận)
+  - `protocol.Action{Name, Description string; Args, Result any; DefaultTimeoutMs int}`, `protocol.Actions []protocol.Action` (24 actions, in the order of §5), `protocol.Lookup(name string) (protocol.Action, bool)`, `protocol.MaxTimeoutMs = 120000`
+  - Args/result structs for each action, for example `protocol.NavigateArgs{URL, NewTab, GroupTitle}`, `protocol.FindTabArgs{URL, Active}`, `protocol.UploadArgs{Selector, Files}`, `protocol.ScreenshotArgs{Format, Quality, Selector, FullPage, Path}`, `protocol.CDPArgs{Method, Params}`, `protocol.ScreenshotCapture{Data, MimeType, Width, Height}` (sent back by the extension), `protocol.ScreenshotResult{Path, SizeBytes, MimeType, Width, Height}` (received by the agent)
   - Frame: `protocol.Hello`, `protocol.Welcome{Type, ProtocolVersion, DaemonVersion, BlockedHosts}`, `protocol.RequestFrame{Type, ID, Session, Action, Args, Deadline int64}`, `protocol.ResponseFrame{Type, ID, OK, Data, Error}`, `protocol.EventFrame`, `protocol.PingFrame`, `protocol.PongFrame`
-  - `protocol.InputSchema(a protocol.Action) json.RawMessage`: schema inline, không có `$schema`/`$id`/`$ref`
-  - `protocol.Document() ([]byte, error)`: nội dung `schema/protocol.schema.json`
-  - `protocol.ValidateArgs(a protocol.Action, args json.RawMessage) error`: args rỗng hoặc `null` được coi là `{}`
+  - `protocol.InputSchema(a protocol.Action) json.RawMessage`: inline schema, with no `$schema`/`$id`/`$ref`
+  - `protocol.Document() ([]byte, error)`: the content of `schema/protocol.schema.json`
+  - `protocol.ValidateArgs(a protocol.Action, args json.RawMessage) error`: empty or `null` args are treated as `{}`
 
-Các ràng buộc "đúng một trong" của spec được mã hoá bằng `oneof_required` (`select`: `value`|`label`; `scroll`: `selector`|`direction`; `wait_for`: `selector`|`text`|`urlContains`|`load`). `JSONSchemaExtend` bổ sung `dependentRequired` (`amount` cần `direction`, `state` cần `selector`) và `load: const true`.
+The spec's "exactly one of" constraints are encoded with `oneof_required` (`select`: `value`|`label`; `scroll`: `selector`|`direction`; `wait_for`: `selector`|`text`|`urlContains`|`load`). `JSONSchemaExtend` adds `dependentRequired` (`amount` needs `direction`, `state` needs `selector`) and `load: const true`.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/internal/protocol/actions_test.go`:
 
@@ -450,18 +450,18 @@ func TestDocumentHasEveryActionType(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/protocol/`
 Expected: FAIL, `undefined: Actions`, `undefined: Lookup`, `undefined: ValidateArgs`, `undefined: Document`
 
-- [ ] **Step 3: Thêm dependency**
+- [ ] **Step 3: Add the dependencies**
 
 ```bash
 go -C daemon get github.com/invopop/jsonschema@v0.14.0 github.com/santhosh-tekuri/jsonschema/v6@v6.0.3
 ```
 
-- [ ] **Step 4: Viết `actions.go`**
+- [ ] **Step 4: Write `actions.go`**
 
 `daemon/internal/protocol/actions.go`:
 
@@ -778,7 +778,7 @@ func Lookup(name string) (Action, bool) {
 }
 ```
 
-- [ ] **Step 5: Viết `frames.go`**
+- [ ] **Step 5: Write `frames.go`**
 
 `daemon/internal/protocol/frames.go`:
 
@@ -838,7 +838,7 @@ type PongFrame struct {
 }
 ```
 
-- [ ] **Step 6: Viết `schema.go`**
+- [ ] **Step 6: Write `schema.go`**
 
 `daemon/internal/protocol/schema.go`:
 
@@ -985,7 +985,7 @@ func ValidateArgs(a Action, args json.RawMessage) error {
 }
 ```
 
-- [ ] **Step 7: Chạy test, xác nhận pass**
+- [ ] **Step 7: Run the test, confirm it passes**
 
 ```bash
 go -C daemon mod tidy
@@ -994,7 +994,7 @@ go -C daemon test ./internal/protocol/
 
 Expected: `ok  github.com/phantranthelinh/browser-bridge/daemon/internal/protocol`
 
-Message lỗi validate sẽ có dạng `invalid args for navigate: at '': missing property 'url'`. Không được chứa `mem:///`.
+A validation error message will look like `invalid args for navigate: at '': missing property 'url'`. It must not contain `mem:///`.
 
 - [ ] **Step 8: Commit**
 
@@ -1005,7 +1005,7 @@ git commit -m "feat(daemon): define actions and frames, validate args with JSON 
 
 ---
 
-### Task 3: `schemagen` và file schema được commit
+### Task 3: `schemagen` and the committed schema file
 
 **Files:**
 - Create: `daemon/cmd/schemagen/main.go`
@@ -1014,9 +1014,9 @@ git commit -m "feat(daemon): define actions and frames, validate args with JSON 
 
 **Interfaces:**
 - Consumes: `protocol.Document()` (Task 2).
-- Produces: `schema/protocol.schema.json` với `$defs` đặt tên theo Go type (`NavigateArgs`, `TabResult`, `Hello`, `ActionName`, …). Plan extension dùng `json-schema-to-typescript` đọc file này. Lệnh sinh lại: `go -C daemon run ./cmd/schemagen`.
+- Produces: `schema/protocol.schema.json` with `$defs` named after the Go types (`NavigateArgs`, `TabResult`, `Hello`, `ActionName`, …). The extension plan reads this file with `json-schema-to-typescript`. Command to regenerate: `go -C daemon run ./cmd/schemagen`.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/cmd/schemagen/main_test.go`:
 
@@ -1050,12 +1050,12 @@ func TestCommittedSchemaIsUpToDate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./cmd/schemagen/`
 Expected: FAIL `open ../../../schema/protocol.schema.json: The system cannot find the file specified. (run: go -C daemon run ./cmd/schemagen)`
 
-- [ ] **Step 3: Viết `main.go`**
+- [ ] **Step 3: Write `main.go`**
 
 `daemon/cmd/schemagen/main.go`:
 
@@ -1091,18 +1091,18 @@ func main() {
 }
 ```
 
-- [ ] **Step 4: Sinh schema rồi chạy test**
+- [ ] **Step 4: Generate the schema, then run the test**
 
 ```bash
 go -C daemon run ./cmd/schemagen
 go -C daemon test ./cmd/schemagen/
 ```
 
-Expected: in ra `wrote ../schema/protocol.schema.json`, test `ok`. Mở file kiểm tra: `$defs.Welcome.properties` có `blockedHosts`, `$defs.ActionName.enum` có 24 phần tử.
+Expected: prints `wrote ../schema/protocol.schema.json`, test `ok`. Open the file and check: `$defs.Welcome.properties` has `blockedHosts`, and `$defs.ActionName.enum` has 24 elements.
 
-- [ ] **Step 5: Xác nhận test bắt được schema cũ**
+- [ ] **Step 5: Confirm the test catches a stale schema**
 
-Sửa tạm một `jsonschema_description` bất kỳ trong `actions.go`, chạy `go -C daemon test ./cmd/schemagen/`. Expected: FAIL `schema/protocol.schema.json is stale`. Hoàn tác thay đổi đó, chạy lại thì pass.
+Temporarily change any `jsonschema_description` in `actions.go`, then run `go -C daemon test ./cmd/schemagen/`. Expected: FAIL `schema/protocol.schema.json is stale`. Revert that change and run again; it passes.
 
 - [ ] **Step 6: Commit**
 
@@ -1113,7 +1113,7 @@ git commit -m "feat(daemon): generate schema/protocol.schema.json and fail tests
 
 ---
 
-### Task 4: Thư mục home, config, file runtime và log
+### Task 4: Home directory, config, runtime files and log
 
 **Files:**
 - Create: `daemon/internal/home/home.go`
@@ -1124,14 +1124,14 @@ git commit -m "feat(daemon): generate schema/protocol.schema.json and fail tests
 - Produces:
   - `home.Config{Addr string; BlockedHosts []string; ExtensionIDs []string}` (tag JSON `addr`, `blockedHosts`, `extensionIds`)
   - `home.DefaultAddr = "127.0.0.1:9876"`
-  - `home.Dir() (string, error)`: `%USERPROFILE%\.browser-bridge`; biến môi trường `BRIDGE_HOME` ghi đè (dùng cho test)
+  - `home.Dir() (string, error)`: `%USERPROFILE%\.browser-bridge`; the environment variable `BRIDGE_HOME` overrides it (used for tests)
   - `home.ArtifactsDir(dir string) string`
-  - `home.LoadConfig(dir string) (home.Config, error)`: file thiếu thì dùng mặc định; host trong `BlockedHosts` được lowercase và trim; `ExtensionIDs`/`BlockedHosts` không bao giờ là `nil`
+  - `home.LoadConfig(dir string) (home.Config, error)`: a missing file falls back to the defaults; hosts in `BlockedHosts` are lowercased and trimmed; `ExtensionIDs`/`BlockedHosts` are never `nil`
   - `home.ValidateAddr(addr string) error`, `home.ResolveAddr(flagAddr string, cfg home.Config) (string, error)`
   - `home.WriteRuntimeFiles(dir string, pid int, addr string) error`, `home.RemoveRuntimeFiles(dir string)`
-  - `home.OpenLog(dir string) (*os.File, error)`: đổi `logs/daemon.log` cũ thành `daemon.log.prev`
+  - `home.OpenLog(dir string) (*os.File, error)`: renames the old `logs/daemon.log` to `daemon.log.prev`
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/internal/home/home_test.go`:
 
@@ -1252,12 +1252,12 @@ func TestOpenLogKeepsPreviousRun(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/home/`
 Expected: FAIL, `undefined: LoadConfig`, …
 
-- [ ] **Step 3: Viết `home.go`**
+- [ ] **Step 3: Write `home.go`**
 
 `daemon/internal/home/home.go`:
 
@@ -1399,7 +1399,7 @@ func OpenLog(dir string) (*os.File, error) {
 }
 ```
 
-- [ ] **Step 4: Chạy test, xác nhận pass**
+- [ ] **Step 4: Run the test, confirm it passes**
 
 Run: `go -C daemon test ./internal/home/`
 Expected: `ok`
@@ -1413,7 +1413,7 @@ git commit -m "feat(daemon): load config strictly and manage pid, addr and log f
 
 ---
 
-### Task 5: Hàng đợi theo session
+### Task 5: Per-session queue
 
 **Files:**
 - Create: `daemon/internal/session/queue.go`
@@ -1422,10 +1422,10 @@ git commit -m "feat(daemon): load config strictly and manage pid, addr and log f
 **Interfaces:**
 - Produces:
   - `session.New() *session.Queues`
-  - `(*Queues).Acquire(ctx context.Context, session string) (release func(), err error)`: chờ tới lượt; `ctx` hết hạn thì trả `ctx.Err()`; gọi `release` hai lần không gây hại
-  - `(*Queues).Forget(session string)`, `(*Queues).Count() int`: số session đã gửi lệnh mà chưa `close_session`
+  - `(*Queues).Acquire(ctx context.Context, session string) (release func(), err error)`: waits for its turn; if `ctx` expires it returns `ctx.Err()`; calling `release` twice does no harm
+  - `(*Queues).Forget(session string)`, `(*Queues).Count() int`: the number of sessions that have sent a command and not yet `close_session`
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/internal/session/queue_test.go`:
 
@@ -1547,12 +1547,12 @@ func TestCountAndForget(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/session/`
 Expected: FAIL, `undefined: New`
 
-- [ ] **Step 3: Viết `queue.go`**
+- [ ] **Step 3: Write `queue.go`**
 
 `daemon/internal/session/queue.go`:
 
@@ -1644,7 +1644,7 @@ func (q *Queues) users(session string) int {
 }
 ```
 
-- [ ] **Step 4: Chạy test nhiều lần, xác nhận pass ổn định**
+- [ ] **Step 4: Run the test several times, confirm it passes stably**
 
 Run: `go -C daemon test -count=5 ./internal/session/`
 Expected: `ok`
@@ -1658,7 +1658,7 @@ git commit -m "feat(daemon): serialize commands per session in arrival order"
 
 ---
 
-### Task 6: Extension giả và WebSocket hub
+### Task 6: Fake extension and the WebSocket hub
 
 **Files:**
 - Create: `daemon/internal/fakeext/fakeext.go`
@@ -1666,26 +1666,26 @@ git commit -m "feat(daemon): serialize commands per session in arrival order"
 - Test: `daemon/internal/server/hub_test.go`
 
 **Interfaces:**
-- Consumes: frame và `protocol.Response`/`protocol.Fail` (Task 1, 2).
+- Consumes: the frames and `protocol.Response`/`protocol.Fail` (Task 1, 2).
 - Produces:
-  - `fakeext.Dial(ctx context.Context, wsURL string, opt fakeext.Options) (*fakeext.Ext, error)`; `fakeext.Options{ID string; ProtocolVersion int; Handler fakeext.Handler}`; `fakeext.Handler func(f protocol.RequestFrame) (resp protocol.Response, reply bool)`; `fakeext.Echo`; các field và method `Ext.Welcome`, `Ext.Requests chan protocol.RequestFrame`, `Ext.Pongs`, `Ext.Ping(ctx)`, `Ext.Send(ctx, v)`, `Ext.Close()`, `Ext.Closed(ctx) error`. Khi daemon từ chối, lỗi trả về mang close code: `websocket.CloseStatus(err)` cho ra 4400 hoặc 4409.
+  - `fakeext.Dial(ctx context.Context, wsURL string, opt fakeext.Options) (*fakeext.Ext, error)`; `fakeext.Options{ID string; ProtocolVersion int; Handler fakeext.Handler}`; `fakeext.Handler func(f protocol.RequestFrame) (resp protocol.Response, reply bool)`; `fakeext.Echo`; the fields and methods `Ext.Welcome`, `Ext.Requests chan protocol.RequestFrame`, `Ext.Pongs`, `Ext.Ping(ctx)`, `Ext.Send(ctx, v)`, `Ext.Close()`, `Ext.Closed(ctx) error`. When the daemon rejects the connection, the returned error carries the close code: `websocket.CloseStatus(err)` yields 4400 or 4409.
   - `server.NewHub(blockedHosts []string, log *slog.Logger) *server.Hub`
-  - `(*Hub).ServeWS(w, r)`: handler cho `GET /ws` (Origin đã được middleware ở Task 7 kiểm tra)
-  - `(*Hub).Ready() *protocol.Error`: `nil`, `VERSION_MISMATCH` (hint nêu phía nào cũ hơn) hoặc `EXTENSION_NOT_CONNECTED`
-  - `(*Hub).Do(ctx, session, action string, args json.RawMessage, deadline time.Time) protocol.Response`: `ctx` hết hạn thì trả `TIMEOUT`
+  - `(*Hub).ServeWS(w, r)`: the handler for `GET /ws` (the Origin has already been checked by the middleware in Task 7)
+  - `(*Hub).Ready() *protocol.Error`: `nil`, `VERSION_MISMATCH` (the hint says which side is older) or `EXTENSION_NOT_CONNECTED`
+  - `(*Hub).Do(ctx, session, action string, args json.RawMessage, deadline time.Time) protocol.Response`: if `ctx` expires it returns `TIMEOUT`
   - `(*Hub).Status() server.ExtensionStatus{Connected, ID, Version, Browser, ProtocolVersion}`
-  - Field `idleTimeout` (mặc định 60s) để test rút ngắn
+  - Field `idleTimeout` (default 60s) so tests can shorten it
 
-- [ ] **Step 1: Thêm dependency**
+- [ ] **Step 1: Add the dependency**
 
 ```bash
 mkdir -p daemon/internal/fakeext daemon/internal/server
 go -C daemon get github.com/coder/websocket@v1.8.15
 ```
 
-- [ ] **Step 2: Viết extension giả**
+- [ ] **Step 2: Write the fake extension**
 
-Đây là công cụ test (spec §12), không phải code đang được test, nên viết trước. `daemon/internal/fakeext/fakeext.go`:
+This is a test tool (spec §12), not the code under test, so it is written first. `daemon/internal/fakeext/fakeext.go`:
 
 ```go
 // Package fakeext is a Go stand-in for the browser extension. It speaks the daemon's WebSocket
@@ -1838,7 +1838,7 @@ func write(ctx context.Context, c *websocket.Conn, v any) error {
 }
 ```
 
-- [ ] **Step 3: Viết test fail cho hub**
+- [ ] **Step 3: Write the failing test for the hub**
 
 `daemon/internal/server/hub_test.go`:
 
@@ -2078,12 +2078,12 @@ func TestVersionMismatch(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Chạy test, xác nhận fail**
+- [ ] **Step 4: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/server/`
 Expected: FAIL, `undefined: NewHub`, `undefined: Hub`
 
-- [ ] **Step 5: Viết `hub.go`**
+- [ ] **Step 5: Write `hub.go`**
 
 `daemon/internal/server/hub.go`:
 
@@ -2366,7 +2366,7 @@ func writeJSON(ctx context.Context, c *websocket.Conn, v any) error {
 }
 ```
 
-- [ ] **Step 6: Chạy test nhiều lần, xác nhận pass ổn định**
+- [ ] **Step 6: Run the test several times, confirm it passes stably**
 
 ```bash
 go -C daemon mod tidy
@@ -2389,7 +2389,7 @@ git commit -m "feat(daemon): add WebSocket hub for the extension and a Go fake e
 **Files:**
 - Create: `daemon/internal/server/server.go`
 - Create: `daemon/internal/server/command.go`
-- Create: `daemon/internal/server/checks.go` (bản tối thiểu; Task 8 thay toàn bộ)
+- Create: `daemon/internal/server/checks.go` (minimal version; Task 8 replaces it entirely)
 - Test: `daemon/internal/server/harness_test.go`
 - Test: `daemon/internal/server/security_test.go`
 - Test: `daemon/internal/server/http_test.go`
@@ -2398,11 +2398,11 @@ git commit -m "feat(daemon): add WebSocket hub for the extension and a Go fake e
 - Consumes: `home.Config` (Task 4), `session.Queues` (Task 5), `Hub` (Task 6), `protocol.ValidateArgs`/`InputSchema`/`Lookup` (Task 2).
 - Produces:
   - `server.Options{Config home.Config; ArtifactsDir string; Log *slog.Logger}`, `server.New(opt server.Options) *server.Server`, `(*Server).Handler() http.Handler`
-  - Method chưa export `(*Server).precheck(action string, args json.RawMessage) *protocol.Error`: Task 8 điền nội dung
-  - Thứ tự pipeline trong `run`: lookup → regex session → `timeoutMs` → schema → `precheck` → `hub.Ready` → hàng đợi → `hub.Do` → hậu xử lý theo action → `data` rỗng thành `{}`
-  - Log mỗi lệnh một dòng `slog`: `session`, `action`, `ms`, `ok`, `selector`, `url` (bỏ query string), `code`. Không bao giờ ghi toàn bộ args.
+  - Unexported method `(*Server).precheck(action string, args json.RawMessage) *protocol.Error`: Task 8 fills in its content
+  - Pipeline order in `run`: lookup → session regex → `timeoutMs` → schema → `precheck` → `hub.Ready` → queue → `hub.Do` → per-action post-processing → empty `data` becomes `{}`
+  - Log one `slog` line per command: `session`, `action`, `ms`, `ok`, `selector`, `url` (query string stripped), `code`. Never log the full args.
 
-- [ ] **Step 1: Viết harness dùng chung cho test**
+- [ ] **Step 1: Write the shared test harness**
 
 `daemon/internal/server/harness_test.go`:
 
@@ -2525,7 +2525,7 @@ func expectError(t *testing.T, status int, resp protocol.Response, wantStatus in
 }
 ```
 
-- [ ] **Step 2: Viết test security**
+- [ ] **Step 2: Write the security tests**
 
 `daemon/internal/server/security_test.go`:
 
@@ -2619,7 +2619,7 @@ func TestUnknownPathIsAnEnvelope(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Viết test cho pipeline `/command`, `/status` và `/tools`**
+- [ ] **Step 3: Write the tests for the `/command` pipeline, `/status` and `/tools`**
 
 `daemon/internal/server/http_test.go`:
 
@@ -2837,12 +2837,12 @@ func TestTools(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Chạy test, xác nhận fail**
+- [ ] **Step 4: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/server/`
 Expected: FAIL, `undefined: New`, `undefined: Options`, `undefined: statusBody`
 
-- [ ] **Step 5: Viết `server.go`**
+- [ ] **Step 5: Write `server.go`**
 
 `daemon/internal/server/server.go`:
 
@@ -3019,7 +3019,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: Viết `command.go`**
+- [ ] **Step 6: Write `command.go`**
 
 `daemon/internal/server/command.go`:
 
@@ -3136,9 +3136,9 @@ func (s *Server) logCommand(req protocol.Request, resp protocol.Response, d time
 }
 ```
 
-- [ ] **Step 7: Viết `checks.go` bản tối thiểu**
+- [ ] **Step 7: Write the minimal `checks.go`**
 
-Chưa có check nào; Task 8 thay toàn bộ file này. `daemon/internal/server/checks.go`:
+There are no checks yet; Task 8 replaces this whole file. `daemon/internal/server/checks.go`:
 
 ```go
 package server
@@ -3155,7 +3155,7 @@ func (s *Server) precheck(action string, args json.RawMessage) *protocol.Error {
 }
 ```
 
-- [ ] **Step 8: Chạy test, xác nhận pass**
+- [ ] **Step 8: Run the test, confirm it passes**
 
 Run: `go -C daemon test -count=3 ./internal/server/`
 Expected: `ok`
@@ -3169,24 +3169,24 @@ git commit -m "feat(daemon): serve /command, /tools and /status behind localhost
 
 ---
 
-### Task 8: Kiểm tra phía daemon và lưu screenshot ra file
+### Task 8: Daemon-side checks and saving screenshots to a file
 
 **Files:**
-- Modify: `daemon/internal/server/checks.go` (thay toàn bộ)
-- Modify: `daemon/internal/server/command.go` (khối `switch a.Name` trong `run`)
+- Modify: `daemon/internal/server/checks.go` (replace entirely)
+- Modify: `daemon/internal/server/command.go` (the `switch a.Name` block in `run`)
 - Test: `daemon/internal/server/checks_test.go`
 
 **Interfaces:**
 - Consumes: `(*Server).precheck` (Task 7), `protocol.ScreenshotCapture`/`ScreenshotResult` (Task 2).
 - Produces:
-  - `navigate`: chỉ `http`, `https`, `about:blank`; URL thiếu scheme thì trả `INVALID_REQUEST` kèm hint `https://…`; scheme khác và các trang store extension thì trả `RESTRICTED_URL`; host bị chặn thì trả `BLOCKED_HOST`
-  - `find_tab`: phải có `url` hoặc `active:true`; host lấy từ `kimi.com`, `www.kimi.com/x` hoặc URL đầy đủ
-  - So khớp `blockedHosts`: lowercase, bỏ dấu chấm cuối, bỏ port, khớp đúng host hoặc subdomain
-  - `upload`: mọi file phải là đường dẫn tuyệt đối, tồn tại, và không phải thư mục
-  - `screenshot.path`: phải tuyệt đối. Response OK của extension (`ScreenshotCapture`, base64) được ghi ra file, agent nhận `ScreenshotResult`. Không truyền `path` thì ghi vào `<artifacts>/<session>-<yyyyMMdd-HHmmss.SSS>.png|jpg`
-  - `cdp`: `Browser.*` và `Target.*` trả `CDP_ERROR`; đọc cookie được phép (spec §7.1)
+  - `navigate`: only `http`, `https`, `about:blank`; a URL missing its scheme returns `INVALID_REQUEST` with the hint `https://…`; other schemes and the extension store pages return `RESTRICTED_URL`; a blocked host returns `BLOCKED_HOST`
+  - `find_tab`: must have `url` or `active:true`; the host is taken from `kimi.com`, `www.kimi.com/x` or a full URL
+  - `blockedHosts` matching: lowercase, strip the trailing dot, strip the port, match the exact host or a subdomain
+  - `upload`: every file must be an absolute path, must exist, and must not be a directory
+  - `screenshot.path`: must be absolute. The extension's OK response (`ScreenshotCapture`, base64) is written to a file, and the agent receives `ScreenshotResult`. If `path` is not passed, it is written to `<artifacts>/<session>-<yyyyMMdd-HHmmss.SSS>.png|jpg`
+  - `cdp`: `Browser.*` and `Target.*` return `CDP_ERROR`; reading cookies is allowed (spec §7.1)
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/internal/server/checks_test.go`:
 
@@ -3360,12 +3360,12 @@ func TestScreenshotBadCaptureIsInternal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./internal/server/ -run 'Checks|Screenshot|CDP'`
-Expected: FAIL ở `TestNavigateURLChecks`, `TestFindTabChecks`, `TestUploadPathChecks`, `TestCDPBlocksBrowserAndTargetDomains` và 4 test `TestScreenshot…`
+Expected: FAIL in `TestNavigateURLChecks`, `TestFindTabChecks`, `TestUploadPathChecks`, `TestCDPBlocksBrowserAndTargetDomains` and the 4 `TestScreenshot…` tests
 
-- [ ] **Step 3: Thay toàn bộ `checks.go`**
+- [ ] **Step 3: Replace the whole of `checks.go`**
 
 `daemon/internal/server/checks.go`:
 
@@ -3534,16 +3534,16 @@ func (s *Server) saveScreenshot(session string, args json.RawMessage, resp proto
 }
 ```
 
-- [ ] **Step 4: Nối `saveScreenshot` vào pipeline**
+- [ ] **Step 4: Wire `saveScreenshot` into the pipeline**
 
-Trong `daemon/internal/server/command.go`, hàm `run`, thay:
+In `daemon/internal/server/command.go`, function `run`, replace:
 
 ```go
 	switch a.Name {
 	case "close_session":
 ```
 
-bằng:
+with:
 
 ```go
 	switch a.Name {
@@ -3552,7 +3552,7 @@ bằng:
 	case "close_session":
 ```
 
-- [ ] **Step 5: Chạy toàn bộ test của server**
+- [ ] **Step 5: Run all the server tests**
 
 Run: `go -C daemon test -count=3 ./internal/server/`
 Expected: `ok`
@@ -3566,7 +3566,7 @@ git commit -m "feat(daemon): check URLs, blocked hosts, file paths and CDP metho
 
 ---
 
-### Task 9: `bridge serve` và smoke test
+### Task 9: `bridge serve` and the smoke test
 
 **Files:**
 - Create: `daemon/cmd/bridge/main.go`
@@ -3574,9 +3574,9 @@ git commit -m "feat(daemon): check URLs, blocked hosts, file paths and CDP metho
 
 **Interfaces:**
 - Consumes: `home` (Task 4), `server` (Task 7, 8), `protocol.Version`.
-- Produces: binary `bridge` với `serve [--addr host:port]` và `version`. Hàm `serve(ctx context.Context, args []string, stderr io.Writer) int` trả exit code, để plan CLI gọi lại khi làm `start`. Khi chạy: ghi `daemon.pid`/`daemon.addr`, xoá khi thoát bằng Ctrl+C; log ghi vào `logs/daemon.log` và stderr.
+- Produces: the `bridge` binary with `serve [--addr host:port]` and `version`. The function `serve(ctx context.Context, args []string, stderr io.Writer) int` returns the exit code, so the CLI plan can call it again when it builds `start`. While running: writes `daemon.pid`/`daemon.addr` and removes them on exit via Ctrl+C; the log is written to `logs/daemon.log` and stderr.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `daemon/cmd/bridge/main_test.go`:
 
@@ -3678,12 +3678,12 @@ func TestServeRefusesBusyPort(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test, confirm it fails**
 
 Run: `go -C daemon test ./cmd/bridge/`
 Expected: FAIL `[build failed]`, `undefined: serve`
 
-- [ ] **Step 3: Viết `main.go`**
+- [ ] **Step 3: Write `main.go`**
 
 `daemon/cmd/bridge/main.go`:
 
@@ -3792,16 +3792,16 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 }
 ```
 
-- [ ] **Step 4: Chạy toàn bộ test và vet**
+- [ ] **Step 4: Run all the tests and vet**
 
 ```bash
 go -C daemon vet ./...
 go -C daemon test -count=1 ./...
 ```
 
-Expected: `vet` không in gì; mọi package `ok` (riêng `internal/fakeext` báo `[no test files]`).
+Expected: `vet` prints nothing; every package is `ok` (only `internal/fakeext` reports `[no test files]`).
 
-- [ ] **Step 5: Smoke test bằng tay**
+- [ ] **Step 5: Manual smoke test**
 
 Terminal 1 (PowerShell):
 
@@ -3811,7 +3811,7 @@ $env:BRIDGE_HOME = "$env:TEMP\bridge-smoke"
 daemon\bridge.exe serve --addr 127.0.0.1:9877
 ```
 
-Expected: dòng log `msg=listening addr=127.0.0.1:9877 version=0.1.0`.
+Expected: the log line `msg=listening addr=127.0.0.1:9877 version=0.1.0`.
 
 Terminal 2:
 
@@ -3822,13 +3822,13 @@ curl.exe -s -o NUL -w "%{http_code}\n" -X POST http://127.0.0.1:9877/command -H 
 curl.exe -s http://127.0.0.1:9877/tools | Select-String -Pattern '"name":"navigate"' -Quiet
 ```
 
-Expected, theo thứ tự:
-1. JSON có `"running":true`, `"port":9877`, `"extension":{"connected":false}`.
+Expected, in order:
+1. JSON containing `"running":true`, `"port":9877`, `"extension":{"connected":false}`.
 2. `{"ok":false,"error":{"code":"EXTENSION_NOT_CONNECTED",…}}`.
 3. `403`.
 4. `True`.
 
-Nhấn Ctrl+C ở terminal 1. Expected: `daemon.pid` và `daemon.addr` trong `%TEMP%\bridge-smoke` đã bị xoá; `logs\daemon.log` có dòng `command` của `list_tabs`.
+Press Ctrl+C in terminal 1. Expected: `daemon.pid` and `daemon.addr` in `%TEMP%\bridge-smoke` have been removed; `logs\daemon.log` has a `command` line for `list_tabs`.
 
 - [ ] **Step 6: Commit**
 

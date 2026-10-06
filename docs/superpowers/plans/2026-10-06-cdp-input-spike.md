@@ -2,35 +2,35 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Task 3 do người dùng tự làm** trên Chrome thật. Agent làm Task 1, 2, dừng lại chờ kết quả Task 3, rồi làm Task 4.
+> **Task 3 is done by the user** on a real Chrome. The agent does Tasks 1 and 2, stops to wait for the Task 3 results, then does Task 4.
 
-**Goal:** Trả lời câu hỏi của §13 bước 0 trong spec: trên một tab nền (`active:false`) của Chrome thật, input qua CDP (`Input.dispatchMouseEvent`, `Input.insertText`, `Input.dispatchKeyEvent`) và `Page.captureScreenshot` có chạy đúng không. Kết quả quyết định có phải đổi §5.1, §8.4, §8.5 của spec trước khi làm extension hay không.
+**Goal:** Answer the question in §13 step 0 of the spec: on a background tab (`active:false`) of a real Chrome, do input via CDP (`Input.dispatchMouseEvent`, `Input.insertText`, `Input.dispatchKeyEvent`) and `Page.captureScreenshot` work correctly? The result decides whether §5.1, §8.4 and §8.5 of the spec must change before the extension is built.
 
-**Architecture:** Một trang test tĩnh (button, input thường, React controlled input, editor ProseMirror nằm dưới màn hình) do một server Node nhỏ phục vụ. Một extension MV3 tối giản mở trang đó trong tab mới, attach `chrome.debugger`, chạy từng check, rồi hiện bảng PASS/FAIL. Mỗi lần bấm icon chạy 3 biến thể: tab nền có focus emulation, tab nền không focus emulation, và tab active làm đối chứng. Code spike nằm trong `spike/`, **không commit**, xoá sau khi ghi kết quả vào spec.
+**Architecture:** A static test page (a button, a plain input, a React controlled input, and a ProseMirror editor placed below the fold) served by a small Node server. A minimal MV3 extension opens that page in a new tab, attaches `chrome.debugger`, runs each check, then shows a PASS/FAIL table. Each click on the icon runs 3 variants: background tab with focus emulation, background tab without focus emulation, and an active tab as the control. The spike code lives in `spike/`, is **not committed**, and is deleted after the result is recorded in the spec.
 
-**Tech Stack:** Node 22, esbuild, React 19, ProseMirror, Chrome stable 154 trên Windows 11.
+**Tech Stack:** Node 22, esbuild, React 19, ProseMirror, Chrome stable 154 on Windows 11.
 
-**Spec:** `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§8.2, §8.4, §13 bước 0, §14)
+**Spec:** `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§8.2, §8.4, §13 step 0, §14)
 
 ## Global Constraints
 
-- Code spike không vào git: `spike/` được thêm vào `.git/info/exclude`, và bị xoá ở Task 4.
-- Chạy trên Chrome hằng ngày của người dùng. Chrome stable đã bỏ cờ `--load-extension` từ bản 137, nên extension được load bằng tay qua `chrome://extensions` → "Load unpacked".
-- Trang test chạy ở `http://localhost:8765/`.
-- Tiêu chí đạt: mọi dòng PASS ở biến thể **"background tab — focusEmulation: true"** trong cả 3 tình huống cửa sổ A, B, C của Task 3.
-- Spec chỉ được sửa ở Task 4, theo bảng quyết định ở đó.
+- Spike code stays out of git: `spike/` is added to `.git/info/exclude` and is deleted in Task 4.
+- Run on the user's everyday Chrome. Chrome stable dropped the `--load-extension` flag in version 137, so the extension is loaded by hand through `chrome://extensions` → "Load unpacked".
+- The test page runs at `http://localhost:8765/`.
+- Pass criterion: every row is PASS in the variant **"background tab — focusEmulation: true"** in all 3 window scenarios A, B and C of Task 3.
+- The spec is edited only in Task 4, following the decision table there.
 
 ## Review Focus
 
-- **Check viết sai bị đọc thành "CDP không chạy":** biến thể tab active là đối chứng. Check nào fail cả ở đó thì sửa check rồi chạy lại, không kết luận gì về CDP (Task 2 `VARIANTS`, Task 4 bảng quyết định).
-- **Cửa sổ Chrome mất focus của hệ điều hành hoặc bị minimize:** người dùng hay chuyển sang app khác trong lúc agent chạy. Tình huống B và C của Task 3 bắt trường hợp này.
-- **Element nằm dưới màn hình:** editor ProseMirror đặt dưới một khoảng trống 1600px, nên đường `scrollIntoView` → tính toạ độ → click được thử thật (Task 1 `index.html`).
-- **Thanh vàng "đang debug" làm đổi chiều cao viewport:** toạ độ được tính sau khi attach, ngay trước mỗi lần click (Task 2 `click()`).
-- **Text tiếng Việt có dấu qua `Input.insertText`:** check `plain` gõ `xin chào 1` và so khớp nguyên văn (Task 2).
+- **A badly written check being read as "CDP does not work":** the active-tab variant is the control. A check that also fails there gets fixed and re-run, with no conclusion drawn about CDP (Task 2 `VARIANTS`, Task 4 decision table).
+- **Chrome window loses OS focus or is minimized:** users often switch to another app while the agent runs. Scenarios B and C of Task 3 cover this case.
+- **Element below the fold:** the ProseMirror editor sits below a 1600px gap, so the `scrollIntoView` → compute coordinates → click path is exercised for real (Task 1 `index.html`).
+- **The yellow "is debugging" bar changes the viewport height:** coordinates are computed after attach, right before each click (Task 2 `click()`).
+- **Accented Vietnamese text through `Input.insertText`:** the `plain` check types `xin chào 1` and compares it verbatim (Task 2).
 
 ---
 
-### Task 1: Trang test và server tĩnh
+### Task 1: Test page and static server
 
 **Files:**
 - Create: `spike/package.json`
@@ -39,18 +39,18 @@
 - Create: `spike/serve.mjs`
 
 **Interfaces:**
-- Produces: trang ở `http://localhost:8765/` có `#btn`, `#plain`, `#react` (kèm `#react-state` hiện state của React), `#keys`, `#pm .ProseMirror`, và `window.spike = { clicks: {count, trusted}, keys: [{key, trusted}], pmText(): string }`. Task 2 đọc kết quả qua đúng các tên này.
+- Produces: a page at `http://localhost:8765/` with `#btn`, `#plain`, `#react` (plus `#react-state`, which shows the React state), `#keys`, `#pm .ProseMirror`, and `window.spike = { clicks: {count, trusted}, keys: [{key, trusted}], pmText(): string }`. Task 2 reads the results through exactly these names.
 
-- [ ] **Step 1: Loại `spike/` khỏi git**
+- [ ] **Step 1: Keep `spike/` out of git**
 
 ```bash
 echo "spike/" >> .git/info/exclude
 git status --short
 ```
 
-Expected: `git status` không liệt kê gì mới sau khi tạo `spike/` ở các bước sau.
+Expected: `git status` lists nothing new after `spike/` is created in the later steps.
 
-- [ ] **Step 2: Tạo `spike/package.json` và cài dependency**
+- [ ] **Step 2: Create `spike/package.json` and install dependencies**
 
 ```json
 {
@@ -69,7 +69,7 @@ cd spike
 npm i -D esbuild react react-dom prosemirror-model prosemirror-state prosemirror-view prosemirror-schema-basic
 ```
 
-- [ ] **Step 3: Tạo `spike/page/index.html`**
+- [ ] **Step 3: Create `spike/page/index.html`**
 
 ```html
 <!doctype html>
@@ -97,7 +97,7 @@ npm i -D esbuild react react-dom prosemirror-model prosemirror-state prosemirror
 </html>
 ```
 
-- [ ] **Step 4: Tạo `spike/page/app.jsx`**
+- [ ] **Step 4: Create `spike/page/app.jsx`**
 
 ```jsx
 import { useState } from 'react';
@@ -134,7 +134,7 @@ const view = new EditorView(document.querySelector('#pm'), { state: EditorState.
 window.spike.pmText = () => view.state.doc.textContent;
 ```
 
-- [ ] **Step 5: Tạo `spike/serve.mjs`**
+- [ ] **Step 5: Create `spike/serve.mjs`**
 
 ```js
 import { createServer } from 'node:http';
@@ -156,7 +156,7 @@ createServer(async (req, res) => {
 }).listen(8765, '127.0.0.1', () => console.log('spike page on http://localhost:8765/'));
 ```
 
-- [ ] **Step 6: Build, chạy server và kiểm tra trang render đủ**
+- [ ] **Step 6: Build, run the server and check the page renders fully**
 
 ```bash
 cd spike
@@ -164,21 +164,21 @@ npm run build
 npm run serve
 ```
 
-Ở terminal khác:
+In another terminal:
 
 ```bash
 "/c/Program Files/Google/Chrome/Application/chrome.exe" --headless --disable-gpu --user-data-dir="$TEMP/spike-probe" --virtual-time-budget=3000 --dump-dom http://localhost:8765/ | grep -o 'id="react"\|class="ProseMirror"'
 ```
 
-Expected: in ra cả `id="react"` lẫn `class="ProseMirror"`. Thiếu một trong hai nghĩa là bundle lỗi, mở trang trong Chrome và xem Console.
+Expected: prints both `id="react"` and `class="ProseMirror"`. If either is missing, the bundle is broken; open the page in Chrome and check the Console.
 
-- [ ] **Step 7: Kiểm tra tay**
+- [ ] **Step 7: Manual check**
 
-Mở `http://localhost:8765/` trong Chrome, gõ vào ô React: chữ phải hiện lại ngay bên cạnh trong `<output>`. Cuộn xuống cuối trang, gõ vào khung ProseMirror: phải gõ được. Không commit.
+Open `http://localhost:8765/` in Chrome and type into the React input: the text must appear right next to it in the `<output>`. Scroll to the bottom of the page and type into the ProseMirror box: typing must work. Do not commit.
 
 ---
 
-### Task 2: Extension spike
+### Task 2: Spike extension
 
 **Files:**
 - Create: `spike/extension/manifest.json`
@@ -187,10 +187,10 @@ Mở `http://localhost:8765/` trong Chrome, gõ vào ô React: chữ phải hi�
 - Create: `spike/extension/results.js`
 
 **Interfaces:**
-- Consumes: trang và `window.spike` của Task 1.
-- Produces: bấm icon extension → chờ 5 giây → chạy 3 biến thể → lưu `chrome.storage.local.spike = { at, userAgent, runs: [{active, focusEmulation, visibility, click, plain, react, reactReplace, prosemirror, prosemirrorReplace, key, screenshot, tabStillBackground, userTabStillActive, pass: {...}}] }` → badge `OK`/`FAIL` → mở tab `results.html`.
+- Consumes: the page and `window.spike` from Task 1.
+- Produces: clicking the extension icon → wait 5 seconds → run 3 variants → save `chrome.storage.local.spike = { at, userAgent, runs: [{active, focusEmulation, visibility, click, plain, react, reactReplace, prosemirror, prosemirrorReplace, key, screenshot, tabStillBackground, userTabStillActive, pass: {...}}] }` → badge `OK`/`FAIL` → open the `results.html` tab.
 
-- [ ] **Step 1: Tạo `spike/extension/manifest.json`**
+- [ ] **Step 1: Create `spike/extension/manifest.json`**
 
 ```json
 {
@@ -203,9 +203,9 @@ Mở `http://localhost:8765/` trong Chrome, gõ vào ô React: chữ phải hi�
 }
 ```
 
-Manifest này cố ý không có `key`, để spike không chiếm ID của extension thật.
+This manifest deliberately has no `key`, so the spike does not take the ID of the real extension.
 
-- [ ] **Step 2: Tạo `spike/extension/background.js`**
+- [ ] **Step 2: Create `spike/extension/background.js`**
 
 ```js
 const PAGE = 'http://localhost:8765/';
@@ -351,7 +351,7 @@ chrome.action.onClicked.addListener(async () => {
 });
 ```
 
-- [ ] **Step 3: Tạo `spike/extension/results.html`**
+- [ ] **Step 3: Create `spike/extension/results.html`**
 
 ```html
 <!doctype html>
@@ -375,7 +375,7 @@ chrome.action.onClicked.addListener(async () => {
 </html>
 ```
 
-- [ ] **Step 4: Tạo `spike/extension/results.js`**
+- [ ] **Step 4: Create `spike/extension/results.js`**
 
 ```js
 const out = document.querySelector('#out');
@@ -419,7 +419,7 @@ chrome.storage.local.get('spike').then(({ spike }) => {
 });
 ```
 
-- [ ] **Step 5: Kiểm tra cú pháp**
+- [ ] **Step 5: Syntax check**
 
 ```bash
 node --check spike/extension/background.js && node --check spike/extension/results.js && echo OK
@@ -427,39 +427,39 @@ node --check spike/extension/background.js && node --check spike/extension/resul
 
 Expected: `OK`
 
-- [ ] **Step 6: Load vào Chrome**
+- [ ] **Step 6: Load into Chrome**
 
-`chrome://extensions` → bật **Developer mode** → **Load unpacked** → chọn thư mục `spike/extension`. Thẻ "Bridge spike" hiện ra, không có nút **Errors** màu đỏ. Ghim icon từ menu hình mảnh ghép lên thanh công cụ.
+`chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick the `spike/extension` folder. The "Bridge spike" card appears with no red **Errors** button. Pin the icon to the toolbar from the puzzle-piece menu.
 
 ---
 
-### Task 3: Chạy ma trận trên Chrome thật (người dùng làm)
+### Task 3: Run the matrix on a real Chrome (done by the user)
 
-**Files:** không có.
+**Files:** none.
 
 **Interfaces:**
-- Consumes: extension đã load ở Task 2, `npm run serve` đang chạy.
-- Produces: 3 khối JSON (cuối trang `results.html`) cho 3 tình huống A, B, C, dán lại vào cuộc hội thoại.
+- Consumes: the extension loaded in Task 2, with `npm run serve` running.
+- Produces: 3 JSON blocks (at the bottom of `results.html`) for scenarios A, B and C, pasted back into the conversation.
 
-Mỗi lần bấm icon, extension đợi 5 giây rồi mới chạy, khoảng 10–20 giây. Badge `...` nghĩa là đang chạy; xong thì tab kết quả tự mở.
+Each time the icon is clicked, the extension waits 5 seconds before running, and the run takes about 10–20 seconds. The `...` badge means it is running; when done, the results tab opens by itself.
 
-- [ ] **Step 1: Tình huống A, cửa sổ đang focus, người dùng ở tab khác**
+- [ ] **Step 1: Scenario A, window focused, user on another tab**
 
-Mở một trang bất kỳ (ví dụ một trang tin tức) làm tab đang xem. Bấm icon "Bridge spike", để yên cho tới khi tab kết quả mở ra. Copy khối JSON cuối trang.
+Open any page (for example a news page) as the tab being viewed. Click the "Bridge spike" icon and leave everything alone until the results tab opens. Copy the JSON block at the bottom of the page.
 
-- [ ] **Step 2: Tình huống B, Chrome mất focus hệ điều hành**
+- [ ] **Step 2: Scenario B, Chrome loses OS focus**
 
-Bấm icon, rồi trong 5 giây nhấn Alt+Tab sang một app khác (ví dụ VS Code). Đợi 20 giây rồi quay lại Chrome. Copy JSON.
+Click the icon, then within 5 seconds press Alt+Tab to another app (for example VS Code). Wait 20 seconds, then go back to Chrome. Copy the JSON.
 
-- [ ] **Step 3: Tình huống C, cửa sổ Chrome bị minimize**
+- [ ] **Step 3: Scenario C, Chrome window minimized**
 
-Bấm icon, rồi trong 5 giây minimize cửa sổ Chrome. Đợi 20 giây, mở lại. Copy JSON.
+Click the icon, then within 5 seconds minimize the Chrome window. Wait 20 seconds, then restore it. Copy the JSON.
 
-- [ ] **Step 4: Gửi kết quả**
+- [ ] **Step 4: Send the results**
 
-Dán 3 khối JSON vào cuộc hội thoại kèm nhãn A/B/C. Agent điền bảng sau ở Task 4:
+Paste the 3 JSON blocks into the conversation with labels A/B/C. The agent fills in the following table in Task 4:
 
-| Check | A: nền + FE | A: nền, không FE | A: active | B: nền + FE | C: nền + FE |
+| Check | A: background + FE | A: background, no FE | A: active | B: background + FE | C: background + FE |
 |---|---|---|---|---|---|
 | click | | | | | |
 | plain | | | | | |
@@ -473,42 +473,42 @@ Dán 3 khối JSON vào cuộc hội thoại kèm nhãn A/B/C. Agent điền b�
 
 ---
 
-### Task 4: Ghi kết quả vào spec và dọn spike
+### Task 4: Record the result in the spec and clean up the spike
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§13 bước 0, §14, và các mục ở bảng quyết định nếu có check fail)
+- Modify: `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§13 step 0, §14, and the items in the decision table if any check fails)
 - Delete: `spike/`
 
 **Interfaces:**
-- Consumes: bảng kết quả của Task 3.
-- Produces: spec phản ánh đúng cách extension đưa input vào trang. Plan extension (viết sau plan này) đọc spec đã cập nhật.
+- Consumes: the result table from Task 3.
+- Produces: a spec that correctly reflects how the extension delivers input to the page. The extension plan (written after this plan) reads the updated spec.
 
-- [ ] **Step 1: Áp bảng quyết định**
+- [ ] **Step 1: Apply the decision table**
 
-Đọc cột "nền + FE". Check nào fail ở cột **active** thì đó là check sai: sửa check trong `background.js`, nhờ người dùng chạy lại Task 3, không sửa spec theo check đó.
+Read the "background + FE" column. A check that fails in the **active** column is a wrong check: fix the check in `background.js`, ask the user to re-run Task 3, and do not change the spec because of that check.
 
-| Kết quả | Sửa spec |
+| Result | Spec change |
 |---|---|
-| Mọi check PASS ở A, B, C | Không đổi thiết kế. Chỉ ghi kết quả (Step 2) |
-| `click` fail | §8.4 `click`: sau khi kiểm tra actionability, gọi `el.click()` trong isolated world thay cho `Input.dispatchMouseEvent` |
-| `plain`, `react` hoặc `reactReplace` fail | §8.4 `fill` cho input/textarea: gán qua native value setter (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set`) rồi bắn `input` và `change` (bubbles) |
-| `prosemirror` hoặc `prosemirrorReplace` fail | §8.4 `fill` cho contenteditable: chọn hết bằng Selection API rồi `document.execCommand('insertText', false, value)` |
-| `key` hoặc `screenshot` fail | Không có cách thay ở tab nền: §5.1 `navigate` mở tab mới với `active:true`, §8.5 `screenshot` kích hoạt tab trước khi chụp |
-| Fail từ hai nhóm trên trở lên | Đổi hướng toàn bộ như §13 bước 0: `click` dùng `el.click()`, `fill` dùng native setter kèm sự kiện giả, tab mở `active:true` |
-| PASS ở A nhưng fail ở B hoặc C | Thêm một dòng vào §14: điều kiện cửa sổ mà input thật cần, và hint lỗi tương ứng cho agent |
-| Biến thể "không FE" cũng PASS hết | Vẫn giữ `Emulation.setFocusEmulationEnabled` (§8.2); ghi chú là chưa thấy bắt buộc trên bản Chrome này |
+| Every check PASSes in A, B, C | No design change. Only record the result (Step 2) |
+| `click` fails | §8.4 `click`: after the actionability check, call `el.click()` in the isolated world instead of `Input.dispatchMouseEvent` |
+| `plain`, `react` or `reactReplace` fails | §8.4 `fill` for input/textarea: assign through the native value setter (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set`), then fire `input` and `change` (bubbling) |
+| `prosemirror` or `prosemirrorReplace` fails | §8.4 `fill` for contenteditable: select all with the Selection API, then `document.execCommand('insertText', false, value)` |
+| `key` or `screenshot` fails | No substitute exists on a background tab: §5.1 `navigate` opens the new tab with `active:true`, §8.5 `screenshot` activates the tab before capturing |
+| Failures from two or more of the groups above | Change direction entirely as in §13 step 0: `click` uses `el.click()`, `fill` uses the native setter with synthetic events, tabs open with `active:true` |
+| PASS in A but fail in B or C | Add a row to §14: the window condition that real input needs, and the matching error hint for the agent |
+| The "no FE" variant also PASSes everything | Still keep `Emulation.setFocusEmulationEnabled` (§8.2); note that it was not seen to be required on this Chrome version |
 
-- [ ] **Step 2: Ghi kết quả vào spec**
+- [ ] **Step 2: Record the result in the spec**
 
-Ở §13 bước 0, thêm một dòng ngay dưới khối "Thất bại thì đổi hướng…":
+In §13 step 0, add one line right below the block "If it fails, change direction…":
 
 ```markdown
-   **Kết quả (2026-MM-DD, Chrome <version từ userAgent>):** <đạt hết | các check fail và hướng đã chọn>. Đã cập nhật <các mục đã sửa, hoặc "không cần sửa">.
+   **Result (2026-MM-DD, Chrome <version from userAgent>):** <all passed | the failing checks and the direction chosen>. Updated <the sections changed, or "no change needed">.
 ```
 
-Ở §14, cột "Giảm thiểu" của dòng "Input thật qua CDP không tới được tab nền": thay "Spike ở bước 0, có sẵn phương án đổi hướng" bằng kết quả ngắn gọn, ví dụ "Spike 2026-MM-DD đạt trên Chrome 154, kể cả khi cửa sổ bị minimize".
+In §14, in the "Mitigation" column of the row "Real input through CDP does not reach the background tab": replace "Spike at step 0, a fallback direction is ready" with a short result, for example "Spike 2026-MM-DD passed on Chrome 154, even with the window minimized".
 
-- [ ] **Step 3: Xoá spike**
+- [ ] **Step 3: Delete the spike**
 
 ```bash
 rm -rf spike
@@ -516,7 +516,7 @@ sed -i '/^spike\/$/d' .git/info/exclude
 git status --short
 ```
 
-Expected: chỉ còn file spec bị sửa. Gỡ extension "Bridge spike" khỏi `chrome://extensions`.
+Expected: only the modified spec file remains. Remove the "Bridge spike" extension from `chrome://extensions`.
 
 - [ ] **Step 4: Commit**
 

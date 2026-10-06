@@ -2,58 +2,58 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Dựng extension MV3 (WXT + TypeScript): kết nối WebSocket tới daemon với handshake, ping và kết nối lại; quản lý session và tab group; 8 action về tab (`navigate`, `find_tab`, `list_tabs`, `close_tab`, `close_session`, `go_back`, `go_forward`, `reload`); kiểm tra `blockedHosts` phía extension; side panel hiển thị trạng thái. Tất cả được test E2E bằng Playwright trên daemon thật.
+**Goal:** Build the MV3 extension (WXT + TypeScript): a WebSocket connection to the daemon with handshake, ping and reconnect; session and tab group management; 8 tab actions (`navigate`, `find_tab`, `list_tabs`, `close_tab`, `close_session`, `go_back`, `go_forward`, `reload`); `blockedHosts` checks on the extension side; and a side panel that shows the status. Everything is tested end to end with Playwright against a real daemon.
 
-**Architecture:** Mỗi entrypoint WXT chỉ là lớp nối dây mỏng (`src/entrypoints/background.ts`, `src/entrypoints/sidepanel/`). Logic nằm ở `src/background/`:
+**Architecture:** Each WXT entrypoint is only a thin wiring layer (`src/entrypoints/background.ts`, `src/entrypoints/sidepanel/`). The logic lives in `src/background/`:
 - `connection.ts`: socket, handshake, ping, backoff.
-- `router.ts`: các luật chung cho mọi action (session bị dừng, host bị chặn, lệnh dọn dẹp luôn chạy) rồi chuyển tới handler.
-- `sessions.ts`: state trong `chrome.storage.session`, ghi tuần tự.
-- `cdp.ts`: attach, gửi lệnh, chờ event.
-- `actions/tabs.ts`: các handler.
+- `router.ts`: the rules shared by every action (stopped session, blocked host, cleanup commands always run), then dispatch to the handler.
+- `sessions.ts`: state in `chrome.storage.session`, written sequentially.
+- `cdp.ts`: attach, send commands, wait for events.
+- `actions/tabs.ts`: the handlers.
 
-Type của wire format được sinh từ `schema/protocol.schema.json`, nên extension và daemon dùng chung một định nghĩa. Các module thuần được unit test bằng vitest. Phần đụng tới Chrome API được test E2E: Playwright mở Chromium có load extension, nối với `bridge serve` thật và một server tĩnh phục vụ `testpage/`.
+Wire format types are generated from `schema/protocol.schema.json`, so the extension and the daemon share a single definition. Pure modules are unit tested with vitest. The parts that touch Chrome APIs are tested end to end: Playwright opens Chromium with the extension loaded, connected to a real `bridge serve` and a static server that serves `testpage/`.
 
 **Tech Stack:** WXT 0.21, TypeScript 7, React 19 (side panel), vitest 5, json-schema-to-typescript 16, Playwright 1.63 (`@playwright/test`, channel `chromium`), Node 22.
 
 **Spec:** `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§2, §3, §3.1, §5.1, §6.1, §7.1, §8.1, §8.2, §8.5 `navigate`, §8.7, §10, §12)
 
-**Không thuộc plan này:** page agent, snapshot và ref (§6.2, §8.3), các action thao tác trang, chờ, chụp màn hình, network, dialog, `evaluate`, `cdp` (plan 03, 04). Extension này trả `INTERNAL` "not implemented" cho 16 action đó. CLI và MCP thuộc plan 05.
+**Out of scope for this plan:** the page agent, snapshots and refs (§6.2, §8.3), the page interaction actions, waiting, screenshots, network, dialogs, `evaluate`, `cdp` (plans 03, 04). This extension returns `INTERNAL` "not implemented" for those 16 actions. The CLI and MCP belong to plan 05.
 
 ## Global Constraints
 
-- Node 22, npm. Mỗi package (`extension/`, `e2e/`) có `node_modules` và `package-lock.json` riêng.
-- Extension ID cố định `nfjidhefdgblbbfhnmbcogkbphipngif`, lấy từ `extension/manifest-key.txt` (đã có từ plan 01).
-- Permission đúng như §8.1: `debugger`, `tabs`, `tabGroups`, `storage`, `sidePanel`, `alarms`. Không có `host_permissions`.
-- Địa chỉ daemon mặc định `ws://127.0.0.1:9876/ws`, đổi được trong side panel (`chrome.storage.local.daemonUrl`).
-- Ping mỗi 20 giây; backoff 1s → 30s; `chrome.alarms` mỗi 30 giây.
-- Tab mới mở ở nền (`active:false`), vào group đặt tên theo `groupTitle` hoặc tên session.
-- `close_tab` trên tab mượn chỉ trả lại, không đóng. `list_tabs`, `close_tab`, `close_session` không bao giờ bị chặn (§6.1).
-- Không nhắc ticket trong comment; comment chỉ để giải thích điều code không tự nói.
-- E2E dùng daemon ở cổng 19876 và bản build `--mode e2e` có địa chỉ đó compile sẵn, để không bao giờ chạm vào daemon thật của người dùng ở 9876.
+- Node 22, npm. Each package (`extension/`, `e2e/`) has its own `node_modules` and `package-lock.json`.
+- Fixed extension ID `nfjidhefdgblbbfhnmbcogkbphipngif`, taken from `extension/manifest-key.txt` (already present from plan 01).
+- Permissions exactly as in §8.1: `debugger`, `tabs`, `tabGroups`, `storage`, `sidePanel`, `alarms`. No `host_permissions`.
+- Default daemon address `ws://127.0.0.1:9876/ws`, changeable in the side panel (`chrome.storage.local.daemonUrl`).
+- Ping every 20 seconds; backoff 1s → 30s; `chrome.alarms` every 30 seconds.
+- New tabs open in the background (`active:false`) and join a group named after `groupTitle` or the session name.
+- `close_tab` on a borrowed tab only gives it back and does not close it. `list_tabs`, `close_tab` and `close_session` are never blocked (§6.1).
+- Do not mention tickets in comments; comments exist only to explain what the code does not say by itself.
+- E2E uses a daemon on port 19876 and a `--mode e2e` build with that address compiled in, so it never touches the user's real daemon on 9876.
 
 ## Review Focus
 
-- **Service worker bị Chrome tắt khi rảnh:** Chrome dừng SW rảnh sau 30 giây, còn daemon đóng socket im lặng sau 60 giây. Ping 20 giây phải giữ được cả hai. Test: `tests/keepalive.spec.ts` (Task 6), để yên 70 giây rồi kiểm tra daemon không ghi `extension disconnected`.
-- **Trang tự chuyển hướng sang host bị chặn:** daemon không bắt được (URL ban đầu hợp lệ). Extension phải kiểm tra URL sau khi load, không lộ URL hay title, chặn tiếp các lệnh trên tab đó nhưng vẫn cho rời đi. Test: `blocked hosts: refused up front, caught after a redirect…` (Task 6), `refuses page actions while the current tab is on a blocked host…` (Task 5).
-- **`go_back` ngay trên trang đầu tiên của tab mới:** tab được tạo từ `about:blank`; nếu không xoá lịch sử, agent quay về một trang trắng thay vì nhận `NAVIGATION_FAILED`. Test: `back and forward walk the history and stop at its ends` (Task 6).
-- **Hai cập nhật session cùng lúc:** lệnh của các session khác nhau và event đóng tab chạy song song, cùng ghi một key storage. Test: `loses no update when many run at once` (Task 3).
-- **Người dùng bấm Cancel trên thanh debug:** mọi lệnh trừ dọn dẹp, `navigate`, `find_tab` phải trả `DETACHED_BY_USER`. Playwright không bấm được nút đó, nên luật này được pin bằng unit test `refuses everything but cleanup…` (Task 5); phần nối `onDetach` → `stopSessionsOf` chỉ là hai dòng trong `background.ts`.
+- **The service worker is killed by Chrome when idle:** Chrome stops an idle SW after 30 seconds, while the daemon silently closes the socket after 60 seconds. The 20-second ping must keep both alive. Test: `tests/keepalive.spec.ts` (Task 6), which stays idle for 70 seconds and then checks that the daemon did not log `extension disconnected`.
+- **A page redirects itself to a blocked host:** the daemon cannot catch it (the initial URL is valid). The extension must check the URL after load, must not reveal the URL or title, and must keep blocking commands on that tab while still allowing it to leave. Tests: `blocked hosts: refused up front, caught after a redirect…` (Task 6), `refuses page actions while the current tab is on a blocked host…` (Task 5).
+- **`go_back` on the very first page of a new tab:** the tab is created from `about:blank`; without clearing the history, the agent would go back to a blank page instead of receiving `NAVIGATION_FAILED`. Test: `back and forward walk the history and stop at its ends` (Task 6).
+- **Two session updates at the same time:** commands from different sessions and tab-close events run in parallel and write the same storage key. Test: `loses no update when many run at once` (Task 3).
+- **The user clicks Cancel on the debug bar:** every command except cleanup, `navigate` and `find_tab` must return `DETACHED_BY_USER`. Playwright cannot click that button, so this rule is pinned by the unit test `refuses everything but cleanup…` (Task 5); the wiring from `onDetach` → `stopSessionsOf` is just two lines in `background.ts`.
 
 ---
 
-### Task 1: Ghim `protocolVersion` trong schema
+### Task 1: Pin `protocolVersion` in the schema
 
 **Files:**
 - Modify: `daemon/internal/protocol/frames.go`
 - Test: `daemon/internal/protocol/actions_test.go`
-- Modify: `schema/protocol.schema.json` (sinh lại)
+- Modify: `schema/protocol.schema.json` (regenerated)
 
 **Interfaces:**
-- Produces: trong schema, `$defs.Hello.properties.protocolVersion` và `$defs.Welcome.properties.protocolVersion` có `"const": 1`. Type TS sinh ra ở Task 2 là literal `1`, nên khi Go tăng version thì extension compile lỗi cho tới khi được cập nhật theo.
+- Produces: in the schema, `$defs.Hello.properties.protocolVersion` and `$defs.Welcome.properties.protocolVersion` have `"const": 1`. The TS type generated in Task 2 is the literal `1`, so when Go bumps the version the extension fails to compile until it is updated to follow.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
-Thêm vào cuối `daemon/internal/protocol/actions_test.go`:
+Append to the end of `daemon/internal/protocol/actions_test.go`:
 
 ```go
 func TestFramesPinProtocolVersion(t *testing.T) {
@@ -72,14 +72,14 @@ func TestFramesPinProtocolVersion(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `go -C daemon test ./internal/protocol/ -run TestFramesPinProtocolVersion`
 Expected: FAIL `Hello.protocolVersion const = <nil>, want 1`
 
-- [ ] **Step 3: Thêm `JSONSchemaExtend` cho `Hello` và `Welcome`**
+- [ ] **Step 3: Add `JSONSchemaExtend` for `Hello` and `Welcome`**
 
-Trong `daemon/internal/protocol/frames.go`, thay `import "encoding/json"` bằng:
+In `daemon/internal/protocol/frames.go`, replace `import "encoding/json"` with:
 
 ```go
 import (
@@ -89,7 +89,7 @@ import (
 )
 ```
 
-và chèn ngay trước `type Welcome struct {`:
+and insert right before `type Welcome struct {`:
 
 ```go
 // JSONSchemaExtend pins protocolVersion to the Go constant. The extension's generated type then
@@ -106,14 +106,14 @@ func pinProtocolVersion(s *jsonschema.Schema) {
 
 ```
 
-- [ ] **Step 4: Sinh lại schema và chạy toàn bộ test Go**
+- [ ] **Step 4: Regenerate the schema and run all Go tests**
 
 ```bash
 go -C daemon run ./cmd/schemagen
 go -C daemon test ./...
 ```
 
-Expected: mọi package `ok`.
+Expected: every package `ok`.
 
 - [ ] **Step 5: Commit**
 
@@ -124,7 +124,7 @@ git commit -m "feat(daemon): pin protocolVersion in the schema so the extension 
 
 ---
 
-### Task 2: Khung extension WXT và type sinh từ schema
+### Task 2: WXT extension scaffold and types generated from the schema
 
 **Files:**
 - Modify: `.gitignore`
@@ -135,18 +135,18 @@ git commit -m "feat(daemon): pin protocolVersion in the schema so the extension 
 - Create: `extension/scripts/gen-types.mjs`
 - Create: `extension/src/generated/protocol.ts` (sinh ra)
 - Create: `extension/src/shared/state.ts`
-- Create: `extension/src/entrypoints/background.ts` (bản rỗng; Task 6 thay)
+- Create: `extension/src/entrypoints/background.ts` (empty version; Task 6 replaces it)
 
 **Interfaces:**
 - Consumes: `schema/protocol.schema.json` (Task 1), `extension/manifest-key.txt`.
 - Produces:
-  - `src/generated/protocol.ts`: `ActionName`, `ErrorBody` (đổi tên từ `Error` để không che class `Error`), `Hello`, `Welcome`, `RequestFrame`, `ResponseFrame`, và các `*Args`/`*Result` như `NavigateArgs`, `FindTabArgs`, `TabResult`, `FindTabResult`, `ListTabsResult`, `CloseTabResult`, `CloseSessionResult`, `PageResult`
+  - `src/generated/protocol.ts`: `ActionName`, `ErrorBody` (renamed from `Error` so it does not shadow the `Error` class), `Hello`, `Welcome`, `RequestFrame`, `ResponseFrame`, and the `*Args`/`*Result` types such as `NavigateArgs`, `FindTabArgs`, `TabResult`, `FindTabResult`, `ListTabsResult`, `CloseTabResult`, `CloseSessionResult`, `PageResult`
   - `src/shared/state.ts`: `DEFAULT_DAEMON_URL`, `KEYS = {sessions, connection, log, daemonUrl}`, `SessionState`, `Sessions`, `ConnectionStatus`, `LogEntry`, `StorageLike`
-  - Script npm: `build`, `gen`, `check:gen`, `typecheck`, `test`. Build thường ra `.output/chrome-mv3`; `--mode e2e` ra `.output/chrome-mv3-e2e`, với `WXT_DAEMON_URL` lấy lúc build.
+  - npm scripts: `build`, `gen`, `check:gen`, `typecheck`, `test`. A normal build outputs to `.output/chrome-mv3`; `--mode e2e` outputs to `.output/chrome-mv3-e2e`, with `WXT_DAEMON_URL` read at build time.
 
-- [ ] **Step 1: Bổ sung `.gitignore`**
+- [ ] **Step 1: Add to `.gitignore`**
 
-`.gitignore` (toàn bộ file):
+`.gitignore` (the whole file):
 
 ```text
 /daemon/bridge.exe
@@ -158,7 +158,7 @@ node_modules/
 /e2e/playwright-report/
 ```
 
-- [ ] **Step 2: Tạo `extension/package.json` rồi cài**
+- [ ] **Step 2: Create `extension/package.json`, then install**
 
 ```json
 {
@@ -195,9 +195,9 @@ cd extension
 npm install
 ```
 
-Expected: `postinstall` chạy `wxt prepare`, sinh `.wxt/` (đã ignore).
+Expected: `postinstall` runs `wxt prepare`, which generates `.wxt/` (already ignored).
 
-- [ ] **Step 3: Tạo các file cấu hình**
+- [ ] **Step 3: Create the config files**
 
 `extension/wxt.config.ts`:
 
@@ -242,7 +242,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Viết script sinh type rồi sinh `src/generated/protocol.ts`**
+- [ ] **Step 4: Write the type generation script, then generate `src/generated/protocol.ts`**
 
 `extension/scripts/gen-types.mjs`:
 
@@ -301,9 +301,9 @@ npm run gen
 npm run check:gen
 ```
 
-Expected: `wrote …protocol.ts`, rồi `src/generated/protocol.ts is up to date`. Trong file sinh ra, `Hello` có `protocolVersion: 1;`.
+Expected: `wrote …protocol.ts`, then `src/generated/protocol.ts is up to date`. In the generated file, `Hello` has `protocolVersion: 1;`.
 
-- [ ] **Step 5: Viết `src/shared/state.ts`**
+- [ ] **Step 5: Write `src/shared/state.ts`**
 
 `extension/src/shared/state.ts`:
 
@@ -358,7 +358,7 @@ export interface StorageLike {
 }
 ```
 
-- [ ] **Step 6: Entrypoint background rỗng để build được**
+- [ ] **Step 6: Empty background entrypoint so it can build**
 
 `extension/src/entrypoints/background.ts`:
 
@@ -368,7 +368,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 export default defineBackground(() => {});
 ```
 
-- [ ] **Step 7: Build và typecheck**
+- [ ] **Step 7: Build and typecheck**
 
 ```bash
 cd extension
@@ -376,7 +376,7 @@ npm run typecheck
 npm run build
 ```
 
-Expected: `tsc` không in lỗi. Build ra `.output/chrome-mv3/manifest.json` có `"version":"0.1.0"`, `"key":"MIIBIjAN…"` và đủ 6 permission.
+Expected: `tsc` prints no errors. The build outputs `.output/chrome-mv3/manifest.json` with `"version":"0.1.0"`, `"key":"MIIBIjAN…"` and all 6 permissions.
 
 - [ ] **Step 8: Commit**
 
@@ -387,7 +387,7 @@ git commit -m "feat(extension): scaffold WXT extension with types generated from
 
 ---
 
-### Task 3: Host, lỗi, session store và command log
+### Task 3: Hosts, errors, session store and command log
 
 **Files:**
 - Create: `extension/src/background/errors.ts`
@@ -401,12 +401,12 @@ git commit -m "feat(extension): scaffold WXT extension with types generated from
 - Consumes: `ErrorBody` (Task 2), `KEYS`, `SessionState`, `Sessions`, `LogEntry`, `StorageLike` (Task 2).
 - Produces:
   - `errors.ts`: `class BridgeError(code: ErrorCode, message: string, hint?: string)`, `toErrorBody(e: unknown): ErrorBody`, `blockedHost(): BridgeError`, `noCurrentTab(session: string): BridgeError`
-  - `hosts.ts`: `normalizeHost`, `httpHost(url?) → string | null`, `queryHost(query) → string | null`, `hostMatches(host, base)`, `isBlocked(url?, blockedHosts)`, `isRestricted(url?)`. Luật giống hệt `checks.go` của daemon.
-  - `sessions.ts`: `class SessionStore(area: StorageLike)` với `all()`, `get(name)`, `update(name, change)`, `remove(name)`, `forgetTab(tabId) → string[]`, `stopSessionsOf(tabId) → string[]`
-  - `log.ts`: `class CommandLog(area: StorageLike, max = 50)` với `add(entry)`
-  - `test-support.ts`: `memoryStorage()` cho unit test
+  - `hosts.ts`: `normalizeHost`, `httpHost(url?) → string | null`, `queryHost(query) → string | null`, `hostMatches(host, base)`, `isBlocked(url?, blockedHosts)`, `isRestricted(url?)`. The rules are identical to the daemon's `checks.go`.
+  - `sessions.ts`: `class SessionStore(area: StorageLike)` with `all()`, `get(name)`, `update(name, change)`, `remove(name)`, `forgetTab(tabId) → string[]`, `stopSessionsOf(tabId) → string[]`
+  - `log.ts`: `class CommandLog(area: StorageLike, max = 50)` with `add(entry)`
+  - `test-support.ts`: `memoryStorage()` for unit tests
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `extension/src/background/test-support.ts`:
 
@@ -575,12 +575,12 @@ describe('CommandLog', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `npm --prefix extension test`
-Expected: FAIL, `Failed to resolve import "./hosts"` (tương tự cho `./sessions`, `./log`)
+Expected: FAIL, `Failed to resolve import "./hosts"` (similarly for `./sessions`, `./log`)
 
-- [ ] **Step 3: Viết `errors.ts`**
+- [ ] **Step 3: Write `errors.ts`**
 
 ```ts
 import type { ErrorBody } from '../generated/protocol';
@@ -615,7 +615,7 @@ export function noCurrentTab(session: string): BridgeError {
 }
 ```
 
-- [ ] **Step 4: Viết `hosts.ts`**
+- [ ] **Step 4: Write `hosts.ts`**
 
 ```ts
 // Host rules shared by blockedHosts and find_tab. They mirror the daemon's checks.go, so a host the
@@ -670,7 +670,7 @@ export function isRestricted(url: string | undefined): boolean {
 }
 ```
 
-- [ ] **Step 5: Viết `sessions.ts`**
+- [ ] **Step 5: Write `sessions.ts`**
 
 ```ts
 import { KEYS, type SessionState, type Sessions, type StorageLike } from '../shared/state';
@@ -750,7 +750,7 @@ export class SessionStore {
 }
 ```
 
-- [ ] **Step 6: Viết `log.ts`**
+- [ ] **Step 6: Write `log.ts`**
 
 ```ts
 import { KEYS, type LogEntry, type StorageLike } from '../shared/state';
@@ -776,14 +776,14 @@ export class CommandLog {
 }
 ```
 
-- [ ] **Step 7: Chạy test và typecheck**
+- [ ] **Step 7: Run the tests and typecheck**
 
 ```bash
 npm --prefix extension test
 npm --prefix extension run typecheck
 ```
 
-Expected: 3 file test pass (13 test), `tsc` không lỗi.
+Expected: 3 test files pass (13 tests), `tsc` reports no errors.
 
 - [ ] **Step 8: Commit**
 
@@ -794,7 +794,7 @@ git commit -m "feat(extension): add host rules, session store and command log"
 
 ---
 
-### Task 4: Kết nối WebSocket tới daemon
+### Task 4: WebSocket connection to the daemon
 
 **Files:**
 - Create: `extension/src/background/connection.ts`
@@ -805,10 +805,10 @@ git commit -m "feat(extension): add host rules, session store and command log"
 - Produces:
   - `backoffMs(attempt: number): number`, `PING_INTERVAL_MS = 20000`
   - `interface SocketLike`, `interface ConnectionOptions { url(); hello(); onWelcome(w); onRequest(f); onStatus(s); openSocket?(url) }`
-  - `class Connection(opts)` với `connect()` (không mở socket thứ hai), `reconnect()` (bỏ socket cũ, nối lại ngay), getter `connected`
-  - Close code 4400/4409/1006 được đổi thành `ConnectionStatus.error` dễ hiểu
+  - `class Connection(opts)` with `connect()` (does not open a second socket), `reconnect()` (drops the old socket and reconnects immediately), and a `connected` getter
+  - Close codes 4400/4409/1006 are turned into a readable `ConnectionStatus.error`
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `extension/src/background/connection.test.ts`:
 
@@ -969,12 +969,12 @@ describe('Connection', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `npm --prefix extension test -- connection`
 Expected: FAIL, `Failed to resolve import "./connection"`
 
-- [ ] **Step 3: Viết `connection.ts`**
+- [ ] **Step 3: Write `connection.ts`**
 
 ```ts
 import type { Hello, RequestFrame, ResponseFrame, Welcome } from '../generated/protocol';
@@ -1097,7 +1097,7 @@ export class Connection {
 }
 ```
 
-- [ ] **Step 4: Chạy test, xác nhận pass**
+- [ ] **Step 4: Run the test and confirm it passes**
 
 Run: `npm --prefix extension test -- connection`
 Expected: 9 test pass
@@ -1111,7 +1111,7 @@ git commit -m "feat(extension): connect to the daemon with handshake, ping and b
 
 ---
 
-### Task 5: Router và các luật chung của mọi action
+### Task 5: Router and the rules shared by every action
 
 **Files:**
 - Create: `extension/src/background/router.ts`
@@ -1122,9 +1122,9 @@ git commit -m "feat(extension): connect to the daemon with handshake, ping and b
 - Produces:
   - `interface Ctx { session; deadline; sessions; blockedHosts() }`, `type Handler<C extends Ctx> = (ctx: C, args: any) => Promise<unknown>`
   - `createRouter<C>(deps: { sessions; handlers; makeCtx(session, deadline); tabUrl(tabId); blockedHosts() }) → (frame: RequestFrame) => Promise<ResponseFrame>`
-  - Thứ tự luật: action chưa có handler → `INTERNAL`; session bị dừng → `DETACHED_BY_USER`, trừ dọn dẹp, `navigate`, `find_tab`; tab hiện tại ở host bị chặn → `BLOCKED_HOST`, trừ dọn dẹp và các lệnh rời trang (`navigate`, `find_tab`, `go_back`, `go_forward`); rồi mới gọi handler. Kết quả rỗng thành `{}`.
+  - Rule order: action has no handler → `INTERNAL`; session is stopped → `DETACHED_BY_USER`, except cleanup, `navigate`, `find_tab`; current tab is on a blocked host → `BLOCKED_HOST`, except cleanup and the commands that leave the page (`navigate`, `find_tab`, `go_back`, `go_forward`); only then call the handler. An empty result becomes `{}`.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `extension/src/background/router.test.ts`:
 
@@ -1227,12 +1227,12 @@ describe('router', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `npm --prefix extension test -- router`
 Expected: FAIL, `Failed to resolve import "./router"`
 
-- [ ] **Step 3: Viết `router.ts`**
+- [ ] **Step 3: Write `router.ts`**
 
 ```ts
 import type { ActionName, RequestFrame, ResponseFrame } from '../generated/protocol';
@@ -1297,14 +1297,14 @@ export function createRouter<C extends Ctx>(deps: RouterDeps<C>): (frame: Reques
 }
 ```
 
-- [ ] **Step 4: Chạy toàn bộ unit test và typecheck**
+- [ ] **Step 4: Run all unit tests and typecheck**
 
 ```bash
 npm --prefix extension test
 npm --prefix extension run typecheck
 ```
 
-Expected: 5 file test pass (29 test), `tsc` không lỗi.
+Expected: 5 test files pass (29 tests), `tsc` reports no errors.
 
 - [ ] **Step 5: Commit**
 
@@ -1315,7 +1315,7 @@ git commit -m "feat(extension): route commands through the stopped-session and b
 
 ---
 
-### Task 6: Action về tab, chạy E2E trên daemon thật
+### Task 6: Tab actions, run E2E against the real daemon
 
 **Files:**
 - Create: `testpage/index.html`, `testpage/page2.html`
@@ -1324,16 +1324,16 @@ git commit -m "feat(extension): route commands through the stopped-session and b
 - Test: `e2e/tests/tabs.spec.ts`, `e2e/tests/keepalive.spec.ts`
 - Create: `extension/src/background/cdp.ts`
 - Create: `extension/src/background/actions/tabs.ts`
-- Modify: `extension/src/entrypoints/background.ts` (thay toàn bộ)
+- Modify: `extension/src/entrypoints/background.ts` (replace entirely)
 
 **Interfaces:**
-- Consumes: mọi module của Task 3–5, `bridge serve` (plan 01).
+- Consumes: every module from Tasks 3–5, `bridge serve` (plan 01).
 - Produces:
-  - `cdp.ts`: `class Cdp` với `restore(tabIds)`, `attach(tabId)` (bật `Page`, `Runtime`, focus emulation), `detach(tabId)`, `send<T>(tabId, method, params?)`, `waitForEvent<T>(tabId, match, deadline) → { done, cancel }`. Lỗi attach được đổi thành `TAB_NOT_FOUND`, `CDP_ERROR` (DevTools đang mở) hoặc `RESTRICTED_URL`.
-  - `actions/tabs.ts`: `interface TabCtx extends Ctx { cdp: Cdp }`, `tabHandlers` cho 8 action. `navigate` tạo tab trên `about:blank`, `Page.navigate`, chờ `Page.loadEventFired` (bỏ qua khi chỉ đổi `#fragment`), xoá lịch sử của tab mới, kiểm tra lại URL cuối với `blockedHosts`.
-  - Fixture E2E: `bridge` (`command(session, action, args?, timeoutMs?)`, `status()`, `log()`), `browserCtx`, `sw` (service worker của extension, dùng để hỏi Chrome), `site` (`url(path, host?)`), `session` (tên ngẫu nhiên mỗi test); helper `ok()` và `tabInfo()`. Plan 03 dùng lại fixture này.
+  - `cdp.ts`: `class Cdp` with `restore(tabIds)`, `attach(tabId)` (enables `Page`, `Runtime`, focus emulation), `detach(tabId)`, `send<T>(tabId, method, params?)`, `waitForEvent<T>(tabId, match, deadline) → { done, cancel }`. Attach errors are mapped to `TAB_NOT_FOUND`, `CDP_ERROR` (DevTools is open) or `RESTRICTED_URL`.
+  - `actions/tabs.ts`: `interface TabCtx extends Ctx { cdp: Cdp }`, `tabHandlers` for the 8 actions. `navigate` creates the tab on `about:blank`, calls `Page.navigate`, waits for `Page.loadEventFired` (skipped when only the `#fragment` changes), clears the new tab's history, and re-checks the final URL against `blockedHosts`.
+  - E2E fixtures: `bridge` (`command(session, action, args?, timeoutMs?)`, `status()`, `log()`), `browserCtx`, `sw` (the extension's service worker, used to query Chrome), `site` (`url(path, host?)`), `session` (a random name per test); helpers `ok()` and `tabInfo()`. Plan 03 reuses these fixtures.
 
-- [ ] **Step 1: Tạo trang test**
+- [ ] **Step 1: Create the test page**
 
 `testpage/index.html`:
 
@@ -1367,7 +1367,7 @@ git commit -m "feat(extension): route commands through the stopped-session and b
 </html>
 ```
 
-- [ ] **Step 2: Tạo package `e2e/` và cài Chromium cho Playwright**
+- [ ] **Step 2: Create the `e2e/` package and install Chromium for Playwright**
 
 `e2e/package.json`:
 
@@ -1428,7 +1428,7 @@ export default defineConfig({
 }
 ```
 
-- [ ] **Step 3: Viết phần hạ tầng của E2E**
+- [ ] **Step 3: Write the E2E infrastructure**
 
 `e2e/paths.ts`:
 
@@ -1448,7 +1448,7 @@ export const TESTPAGE_DIR = join(root, 'testpage');
 export const EXTENSION_ID = 'nfjidhefdgblbbfhnmbcogkbphipngif';
 ```
 
-`e2e/global-setup.ts`: build daemon và bản E2E của extension trước mỗi lần chạy. Biến môi trường `GO` trỏ tới `go` nếu nó không nằm trong `PATH`.
+`e2e/global-setup.ts`: builds the daemon and the E2E build of the extension before every run. The `GO` environment variable points to `go` if it is not on `PATH`.
 
 ```ts
 import { execFileSync } from 'node:child_process';
@@ -1522,7 +1522,7 @@ export async function startSite(): Promise<Site> {
 }
 ```
 
-`e2e/fixtures.ts`. Hai điểm dễ sai: fixture `bridge` phụ thuộc `browserCtx`, và teardown chờ daemon thoát hẳn. Thiếu một trong hai thì test đầu tiên của worker mới (Playwright dựng lại worker sau mỗi test fail) nhận `EXTENSION_NOT_CONNECTED`.
+`e2e/fixtures.ts`. Two easy mistakes: the `bridge` fixture depends on `browserCtx`, and teardown waits for the daemon to fully exit. If either is missing, the first test of a new worker (Playwright rebuilds the worker after every failed test) gets `EXTENSION_NOT_CONNECTED`.
 
 ```ts
 import { test as base, chromium, expect, type BrowserContext, type Worker } from '@playwright/test';
@@ -1671,7 +1671,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 export { expect };
 ```
 
-- [ ] **Step 4: Viết test E2E**
+- [ ] **Step 4: Write the E2E tests**
 
 `e2e/tests/tabs.spec.ts`:
 
@@ -1831,15 +1831,15 @@ test('stays connected while idle for longer than the daemon idle timeout', async
 });
 ```
 
-- [ ] **Step 5: Chạy E2E, xác nhận fail**
+- [ ] **Step 5: Run E2E and confirm it fails**
 
 ```bash
 npm --prefix e2e test
 ```
 
-Expected: FAIL ở fixture `browserCtx` với `extension never connected`, vì background vẫn là bản rỗng của Task 2.
+Expected: FAIL in the `browserCtx` fixture with `extension never connected`, because the background is still the empty version from Task 2.
 
-- [ ] **Step 6: Viết `cdp.ts`**
+- [ ] **Step 6: Write `cdp.ts`**
 
 `extension/src/background/cdp.ts`:
 
@@ -1985,7 +1985,7 @@ function commandError(method: string, e: unknown): BridgeError {
 }
 ```
 
-- [ ] **Step 7: Viết `actions/tabs.ts`**
+- [ ] **Step 7: Write `actions/tabs.ts`**
 
 `extension/src/background/actions/tabs.ts`:
 
@@ -2219,9 +2219,9 @@ export const tabHandlers = {
 };
 ```
 
-- [ ] **Step 8: Nối dây service worker**
+- [ ] **Step 8: Wire up the service worker**
 
-Thay toàn bộ `extension/src/entrypoints/background.ts`:
+Replace the entire `extension/src/entrypoints/background.ts`:
 
 ```ts
 import { browser } from 'wxt/browser';
@@ -2302,7 +2302,7 @@ export default defineBackground(() => {
 });
 ```
 
-- [ ] **Step 9: Chạy typecheck, unit test và E2E**
+- [ ] **Step 9: Run typecheck, unit tests and E2E**
 
 ```bash
 npm --prefix extension run typecheck
@@ -2311,12 +2311,12 @@ npm --prefix e2e run typecheck
 npm --prefix e2e test
 ```
 
-Expected: `tsc` sạch ở cả hai package; 29 unit test pass; E2E `15 passed` (14 test tab và 1 test keepalive). Test keepalive tốn khoảng 70 giây.
+Expected: `tsc` clean in both packages; 29 unit tests pass; E2E `15 passed` (14 tab tests and 1 keepalive test). The keepalive test takes about 70 seconds.
 
-- [ ] **Step 10: Chạy E2E thêm hai lần để chắc không flaky**
+- [ ] **Step 10: Run E2E two more times to make sure it is not flaky**
 
-Run: `npm --prefix e2e test -- tabs` hai lần.
-Expected: `14 passed` cả hai lần.
+Run: `npm --prefix e2e test -- tabs` twice.
+Expected: `14 passed` both times.
 
 - [ ] **Step 11: Commit**
 
@@ -2336,10 +2336,10 @@ git commit -m "feat(extension): drive tabs through CDP and test them end to end 
 - Test: `e2e/tests/sidepanel.spec.ts`
 
 **Interfaces:**
-- Consumes: `KEYS`, `DEFAULT_DAEMON_URL`, `ConnectionStatus`, `Sessions`, `LogEntry` (Task 2); state mà service worker ghi ở Task 6.
-- Produces: `sidepanel.html` gồm 4 phần của §8.7: trạng thái kết nối (`data-testid="connection-state"`), session và tab, 50 lệnh gần nhất, ô sửa địa chỉ daemon. Bấm icon extension mở side panel (`setPanelBehavior` ở Task 6). Lưu địa chỉ mới thì service worker kết nối lại ngay.
+- Consumes: `KEYS`, `DEFAULT_DAEMON_URL`, `ConnectionStatus`, `Sessions`, `LogEntry` (Task 2); the state the service worker writes in Task 6.
+- Produces: `sidepanel.html` with the 4 parts of §8.7: connection state (`data-testid="connection-state"`), sessions and tabs, the last 50 commands, and a field to edit the daemon address. Clicking the extension icon opens the side panel (`setPanelBehavior` in Task 6). When a new address is saved, the service worker reconnects immediately.
 
-- [ ] **Step 1: Viết test fail**
+- [ ] **Step 1: Write the failing test**
 
 `e2e/tests/sidepanel.spec.ts`:
 
@@ -2358,12 +2358,12 @@ test('the side panel shows the connection, the session and the last command', as
 });
 ```
 
-- [ ] **Step 2: Chạy test, xác nhận fail**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `npm --prefix e2e test -- sidepanel`
-Expected: FAIL, `page.goto: net::ERR_FILE_NOT_FOUND` hoặc không tìm thấy `connection-state`
+Expected: FAIL, `page.goto: net::ERR_FILE_NOT_FOUND` or `connection-state` not found
 
-- [ ] **Step 3: Viết side panel**
+- [ ] **Step 3: Write the side panel**
 
 `extension/src/entrypoints/sidepanel/index.html`:
 
@@ -2502,14 +2502,14 @@ export function App() {
 }
 ```
 
-- [ ] **Step 4: Chạy test, xác nhận pass**
+- [ ] **Step 4: Run the test and confirm it passes**
 
 ```bash
 npm --prefix extension run typecheck
 npm --prefix e2e test -- sidepanel
 ```
 
-Expected: `tsc` sạch, `1 passed`.
+Expected: `tsc` clean, `1 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -2520,48 +2520,48 @@ git commit -m "feat(extension): add side panel with connection, sessions, log an
 
 ---
 
-### Task 8: Cập nhật spec và kiểm tra toàn bộ
+### Task 8: Update the spec and run the full verification
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-06-browser-bridge-design.md` (§3, §12)
 
 **Interfaces:**
-- Produces: spec mô tả đúng cấu trúc WXT và cách E2E cô lập khỏi daemon thật.
+- Produces: the spec describes the WXT structure and how E2E is isolated from the real daemon correctly.
 
-- [ ] **Step 1: Sửa cây thư mục ở §3**
+- [ ] **Step 1: Fix the directory tree in §3**
 
-Thay khối `extension/` trong cây thư mục:
+Replace the `extension/` block in the directory tree:
 
 ```text
 ├── extension/                   WXT + TypeScript
 │   └── src/
 │       ├── background/          service worker: connection, router, sessions, cdp, actions/
-│       ├── page-agent/          bundle IIFE inject vào trang
+│       ├── page-agent/          IIFE bundle injected into the page
 │       ├── sidepanel/           React
-│       └── generated/           type TS sinh từ schema/
+│       └── generated/           TS types generated from schema/
 ```
 
-bằng:
+with:
 
 ```text
 ├── extension/                   WXT + TypeScript
 │   └── src/
-│       ├── entrypoints/         điểm vào của WXT: background.ts, sidepanel/ (React)
-│       ├── background/          logic của service worker: connection, router, sessions, cdp, actions/
-│       ├── page-agent/          bundle IIFE inject vào trang
-│       ├── shared/              type và key storage dùng chung giữa service worker và side panel
-│       └── generated/           type TS sinh từ schema/
+│       ├── entrypoints/         WXT entry points: background.ts, sidepanel/ (React)
+│       ├── background/          service worker logic: connection, router, sessions, cdp, actions/
+│       ├── page-agent/          IIFE bundle injected into the page
+│       ├── shared/              types and storage keys shared between the service worker and the side panel
+│       └── generated/           TS types generated from schema/
 ```
 
-- [ ] **Step 2: Ghi cách E2E cô lập ở §12**
+- [ ] **Step 2: Document how E2E is isolated in §12**
 
-Trong mục **E2E (Playwright, TypeScript)**, thêm một gạch đầu dòng ngay sau dòng "Load extension bằng `launchPersistentContext`…":
+In the **E2E (Playwright, TypeScript)** section, add a bullet right after the line "Load the extension with `launchPersistentContext`…":
 
 ```markdown
-  - Daemon của E2E chạy ở cổng 19876, và extension được build bằng `--mode e2e` với địa chỉ đó compile sẵn (`WXT_DAEMON_URL`), nên một lần chạy test không bao giờ nối vào daemon thật ở 9876.
+  - The E2E daemon runs on port 19876, and the extension is built with `--mode e2e` with that address compiled in (`WXT_DAEMON_URL`), so a test run never connects to the real daemon on 9876.
 ```
 
-- [ ] **Step 3: Chạy toàn bộ kiểm tra**
+- [ ] **Step 3: Run all checks**
 
 ```bash
 go -C daemon vet ./...
@@ -2573,17 +2573,17 @@ npm --prefix e2e run typecheck
 npm --prefix e2e test
 ```
 
-Expected: Go không lỗi và mọi package `ok`; `protocol.ts is up to date`; `tsc` sạch; 29 unit test pass; E2E `16 passed`.
+Expected: Go reports no errors and every package is `ok`; `protocol.ts is up to date`; `tsc` clean; 29 unit tests pass; E2E `16 passed`.
 
-- [ ] **Step 4: Thử tay trên Chrome thật**
+- [ ] **Step 4: Try it by hand in real Chrome**
 
-`go -C daemon build -o bridge.exe ./cmd/bridge`, chạy `daemon\bridge.exe serve`, rồi `npm --prefix extension run build`. Vào `chrome://extensions`, Load unpacked thư mục `extension/.output/chrome-mv3`. Bấm icon: side panel hiện `connected`. Ở terminal khác:
+`go -C daemon build -o bridge.exe ./cmd/bridge`, run `daemon\bridge.exe serve`, then `npm --prefix extension run build`. Go to `chrome://extensions` and Load unpacked the folder `extension/.output/chrome-mv3`. Click the icon: the side panel shows `connected`. In another terminal:
 
 ```powershell
 curl.exe -s -X POST http://127.0.0.1:9876/command -H "Content-Type: application/json" -d '{"action":"navigate","args":{"url":"https://example.com"},"session":"manual"}'
 ```
 
-Expected: tab `example.com` mở ở nền trong group "manual", thanh vàng debug hiện trên tab đó. JSON trả về có `"title":"Example Domain"`. Bấm Cancel trên thanh vàng rồi gọi `reload`: nhận `DETACHED_BY_USER`. Gọi `close_session`: tab và group biến mất.
+Expected: the `example.com` tab opens in the background in the group "manual", and the yellow debug bar shows on that tab. The returned JSON has `"title":"Example Domain"`. Click Cancel on the yellow bar, then call `reload`: you get `DETACHED_BY_USER`. Call `close_session`: the tab and the group disappear.
 
 - [ ] **Step 5: Commit**
 

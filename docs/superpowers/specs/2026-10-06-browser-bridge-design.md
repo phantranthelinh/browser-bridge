@@ -1,392 +1,392 @@
 # Browser Bridge — Design Spec
 
-- **Ngày:** 2026-10-06
-- **Trạng thái:** Draft, chờ review
-- **Tên tạm:** project `browser-bridge`, binary `bridge`
+- **Date:** 2026-10-06
+- **Status:** Draft, awaiting review
+- **Working name:** project `browser-bridge`, binary `bridge`
 
-## 1. Mục tiêu
+## 1. Goals
 
-Một bản tự chủ thay cho Kimi WebBridge: cài extension vào Chrome/Edge rồi để **bất kỳ agent nào** (Claude Code, Codex, harness chạy model Ollama local) điều khiển trình duyệt thật của người dùng, với các session đăng nhập sẵn có. Không cần tài khoản bên thứ ba, toàn bộ source do mình nắm.
+A self-owned replacement for Kimi WebBridge: install an extension into Chrome/Edge and let **any agent** (Claude Code, Codex, a harness running a local Ollama model) control the user's real browser, using their existing logged-in sessions. No third-party account is needed, and we own the whole source.
 
-### 1.1 Use case phải đạt trong MVP
+### 1.1 Use cases the MVP must cover
 
-1. **Đọc trang cần đăng nhập:** mở trang, snapshot, đọc nội dung, chụp màn hình.
-2. **Thao tác form:** click, điền text (kể cả React controlled input và rich text editor), chọn dropdown, nhấn phím, upload file.
-3. **Bắt network:** xem request/response (headers và body) của trang.
-4. **Làm nền để viết CLI riêng cho từng site:** HTTP API ổn định, `evaluate` chạy trong main world của trang, chọn element bằng CSS selector.
+1. **Read pages that require login:** open a page, take a snapshot, read the content, take a screenshot.
+2. **Operate forms:** click, type text (including React controlled inputs and rich text editors), select from dropdowns, press keys, upload files.
+3. **Capture network traffic:** view the requests/responses (headers and body) of a page.
+4. **Serve as a base for writing a dedicated CLI per site:** a stable HTTP API, `evaluate` running in the page's main world, element selection by CSS selector.
 
-### 1.2 Tiêu chí hoàn thành MVP
+### 1.2 MVP completion criteria
 
-Cả 4 use case chạy được trên Chrome hằng ngày của người dùng (Windows), qua 3 consumer:
+All 4 use cases work on the user's everyday Chrome (Windows), through 3 consumers:
 
-- Claude Code, dùng `SKILL.md`;
-- Codex, dùng MCP;
-- một harness chạy model Ollama local, dùng MCP.
+- Claude Code, using `SKILL.md`;
+- Codex, using MCP;
+- a harness running a local Ollama model, using MCP.
 
-### 1.3 Không làm trong MVP
+### 1.3 Out of scope for the MVP
 
-- Chat AI trong side panel (side panel chỉ để xem trạng thái và debug).
-- Thao tác bên trong iframe (snapshot chỉ *liệt kê* các frame), `save_as_pdf`, hover.
-- Nhiều trình duyệt kết nối cùng lúc.
+- AI chat in the side panel (the side panel is only for viewing status and debugging).
+- Operating inside iframes (the snapshot only *lists* frames), `save_as_pdf`, hover.
+- Multiple browsers connected at the same time.
 - Recorder/workflow, agent loop.
-- Publish extension lên store (chỉ load unpacked). Cách phát cho máy khác nằm ở spec installer (`2026-10-06-installer-design.md`).
-- Token xác thực (lý do ở §7).
-- Chính thức hỗ trợ macOS/Linux. Code Go viết portable nhưng chỉ test trên Windows.
+- Publishing the extension to a store (load unpacked only). How to distribute to other machines is covered in the installer spec (`2026-10-06-installer-design.md`).
+- Authentication token (reason in §7).
+- Official macOS/Linux support. The Go code is written to be portable but is only tested on Windows.
 
-## 2. Kiến trúc
+## 2. Architecture
 
 ```text
-Claude Code ──┐ bridge call / curl (theo SKILL.md)
+Claude Code ──┐ bridge call / curl (per SKILL.md)
 Codex ────────┼───────────────────────────▶ HTTP 127.0.0.1:9876   ┐
 Ollama harness┘ MCP stdio: `bridge mcp` ──HTTP──▶                  │ bridge daemon (Go)
-                                                                    │  · validate theo JSON Schema
-                                                                    │  · route theo session
-                                                                    │  · timeout, mã lỗi chuẩn
-                                                                    │  · ghi file screenshot
+                                                                    │  · validate against JSON Schema
+                                                                    │  · route by session
+                                                                    │  · timeouts, standard error codes
+                                                                    │  · write screenshot files
                                                                     ┘
-                                      ▲ WebSocket /ws (extension chủ động kết nối)
+                                      ▲ WebSocket /ws (the extension connects actively)
                                       │
-                         Extension MV3 (TypeScript, WXT)
+                         MV3 extension (TypeScript, WXT)
                           · service worker: WS client, session/tab group,
-                            executor CDP (chrome.debugger)
-                          · page agent inject vào isolated world: snapshot, ref, actionability
-                          · side panel (React): trạng thái, log
+                            CDP executor (chrome.debugger)
+                          · page agent injected into an isolated world: snapshot, ref, actionability
+                          · side panel (React): status, log
 ```
 
-**Ranh giới trách nhiệm:**
-- Daemon không đụng vào CDP hay DOM. Nó chỉ validate request, route tới extension, quản lý timeout và ghi file artifact.
-- Mọi thao tác với trình duyệt nằm trong extension.
-- Agent chỉ biết HTTP API (hoặc tool MCP). Agent không biết gì về Chrome API, CDP hay WebSocket.
+**Responsibility boundaries:**
+- The daemon never touches CDP or the DOM. It only validates requests, routes them to the extension, manages timeouts and writes artifact files.
+- All browser operations live in the extension.
+- The agent only knows the HTTP API (or MCP tools). It knows nothing about the Chrome API, CDP or WebSocket.
 
-## 3. Cấu trúc repo
+## 3. Repo structure
 
 ```text
 browser-bridge/
-├── daemon/                      Go module, build ra binary `bridge`
-│   ├── cmd/bridge/              các subcommand (§9)
-│   ├── cmd/schemagen/           sinh schema/ và bảng tool trong SKILL.md từ Go struct
+├── daemon/                      Go module, builds the `bridge` binary
+│   ├── cmd/bridge/              the subcommands (§9)
+│   ├── cmd/schemagen/           generates schema/ and the tool table in SKILL.md from Go structs
 │   └── internal/
-│       ├── protocol/            Go struct + mô tả cho từng action: nguồn schema duy nhất
-│       ├── server/              HTTP API, kiểm tra security, WebSocket hub
-│       ├── session/             hàng đợi theo session, map request id ↔ response đang chờ
-│       ├── mcp/                 MCP server stdio (Go SDK chính thức), gọi về HTTP API
-│       └── home/                thư mục ~/.browser-bridge, config, pid, log
-├── schema/                      JSON Schema sinh ra từ Go, có commit vào repo
+│       ├── protocol/            Go structs + descriptions for each action: the single source of the schema
+│       ├── server/              HTTP API, security checks, WebSocket hub
+│       ├── session/             per-session queue, map of request id ↔ pending response
+│       ├── mcp/                 stdio MCP server (official Go SDK), calls back into the HTTP API
+│       └── home/                the ~/.browser-bridge directory, config, pid, log
+├── schema/                      JSON Schema generated from Go, committed to the repo
 ├── extension/                   WXT + TypeScript
 │   └── src/
-│       ├── entrypoints/         điểm vào của WXT: background.ts, sidepanel/ (React)
-│       ├── background/          logic của service worker: connection, router, sessions, cdp, actions/
-│       ├── page-agent/          bundle IIFE inject vào trang
-│       ├── shared/              type và key storage dùng chung giữa service worker và side panel
-│       └── generated/           type TS sinh từ schema/
+│       ├── entrypoints/         WXT entry points: background.ts, sidepanel/ (React)
+│       ├── background/          service worker logic: connection, router, sessions, cdp, actions/
+│       ├── page-agent/          IIFE bundle injected into the page
+│       ├── shared/              types and storage keys shared between the service worker and the side panel
+│       └── generated/           TS types generated from schema/
 ├── skill/browser-bridge/SKILL.md
-├── testpage/                    trang HTML tĩnh + API giả để test
+├── testpage/                    static HTML page + fake API for testing
 └── e2e/                         Playwright (TypeScript)
 ```
 
-### 3.1 Codegen (định nghĩa viết một lần)
+### 3.1 Codegen (define once)
 
 ```text
 daemon/internal/protocol (Go struct + description)
    └─ go run ./daemon/cmd/schemagen
         ├─▶ schema/protocol.schema.json ──json-schema-to-typescript──▶ extension/src/generated/protocol.ts
-        ├─▶ danh sách tool cho GET /tools và MCP (Go đọc trực tiếp từ protocol package lúc runtime)
-        └─▶ bảng tool trong SKILL.md (nằm giữa hai marker <!-- tools:begin --> / <!-- tools:end -->)
+        ├─▶ tool list for GET /tools and MCP (Go reads it directly from the protocol package at runtime)
+        └─▶ tool table in SKILL.md (between the two markers <!-- tools:begin --> / <!-- tools:end -->)
 ```
 
-- Daemon validate request bằng JSON Schema đã sinh (`santhosh-tekuri/jsonschema`).
-- Extension chỉ nhận lệnh từ daemon, nên chỉ dùng type TS, không validate lại lúc runtime.
-- Một script `check:gen` chạy lại codegen và báo lỗi nếu có file sinh ra khác với bản đã commit.
+- The daemon validates requests against the generated JSON Schema (`santhosh-tekuri/jsonschema`).
+- The extension only receives commands from the daemon, so it uses TS types only and does not validate again at runtime.
+- A `check:gen` script reruns the codegen and fails if any generated file differs from the committed version.
 
 ## 4. HTTP API
 
-| Endpoint | Mô tả |
+| Endpoint | Description |
 |---|---|
-| `POST /command` | Chạy một action |
-| `GET /tools` | `[{name, description, inputSchema}]`, dùng được làm function definition cho bất kỳ LLM nào |
-| `GET /status` | Trạng thái daemon và extension (§9.3) |
-| `GET /ws` | WebSocket, chỉ dành cho extension (§6) |
-| `POST /shutdown` | Daemon trả 200, tắt êm và tự xoá `daemon.pid`/`daemon.addr`. Dùng cho `bridge stop`; qua cùng các kiểm tra security như `/command` |
+| `POST /command` | Run one action |
+| `GET /tools` | `[{name, description, inputSchema}]`, usable as a function definition for any LLM |
+| `GET /status` | Daemon and extension status (§9.3) |
+| `GET /ws` | WebSocket, for the extension only (§6) |
+| `POST /shutdown` | The daemon returns 200, shuts down gracefully and deletes `daemon.pid`/`daemon.addr` itself. Used by `bridge stop`; goes through the same security checks as `/command` |
 
-### 4.1 Request và response
+### 4.1 Request and response
 
 ```json
 { "action": "click", "args": { "selector": "@e12" }, "session": "jira-report", "timeoutMs": 15000 }
 ```
 
-- `session`: bắt buộc, khớp regex `^[a-z0-9][a-z0-9_-]{0,63}$`.
-- `timeoutMs`: không bắt buộc, tối đa 120000. Mặc định 30000 cho `navigate`/`reload`/`go_back`/`go_forward`, 15000 cho các action còn lại.
+- `session`: required, matches the regex `^[a-z0-9][a-z0-9_-]{0,63}$`.
+- `timeoutMs`: optional, at most 120000. Defaults to 30000 for `navigate`/`reload`/`go_back`/`go_forward`, and 15000 for all other actions.
 
 ```json
 { "ok": true,  "data": { } }
 { "ok": false, "error": { "code": "STALE_REF", "message": "@e12 is no longer in the page", "hint": "Take a new snapshot" } }
 ```
 
-- `hint` không bắt buộc. Đó là gợi ý bước tiếp theo agent nên làm, viết cho cả model nhỏ hiểu được.
+- `hint` is optional. It is a suggestion for the next step the agent should take, written so that small models can understand it too.
 - HTTP status:
 
-  | Status | Khi nào |
+  | Status | When |
   |---|---|
-  | 200 | Mọi kết quả đã xử lý được, kể cả `ok:false` |
-  | 400 | JSON hỏng, sai schema, action không tồn tại |
-  | 403 | Không qua được kiểm tra security (§7), mã lỗi `FORBIDDEN` |
+  | 200 | Every result that was handled, including `ok:false` |
+  | 400 | Malformed JSON, wrong schema, nonexistent action |
+  | 403 | Fails the security checks (§7), error code `FORBIDDEN` |
 
-  Mọi trường hợp đều trả đúng envelope trên.
+  Every case returns the envelope above.
 
-## 5. Action trong MVP
+## 5. MVP actions
 
-`selector` là ref `@e<n>` hoặc CSS selector. Chuỗi bắt đầu bằng `@e` thì là ref, còn lại coi là CSS. CSS phải khớp **đúng một** element:
-- không khớp element nào thì trả `ELEMENT_NOT_FOUND` (riêng `wait_for` thì chờ tiếp, §5.4);
-- khớp hơn một element thì trả `AMBIGUOUS_SELECTOR`.
+`selector` is either a ref `@e<n>` or a CSS selector. A string starting with `@e` is a ref; anything else is treated as CSS. A CSS selector must match **exactly one** element:
+- if it matches no element, return `ELEMENT_NOT_FOUND` (except `wait_for`, which keeps waiting, §5.4);
+- if it matches more than one element, return `AMBIGUOUS_SELECTOR`.
 
-### 5.1 Tab và điều hướng
+### 5.1 Tabs and navigation
 
-| Action | Args | Trả về `data` | Ghi chú |
+| Action | Args | Returns `data` | Notes |
 |---|---|---|---|
-| `navigate` | `url` (bắt buộc), `newTab` (bool, mặc định false), `groupTitle` | `tabId, url, title` | Session chưa có tab hiện tại thì luôn tạo tab mới. Tab mới mở ở nền (`active:false`). `groupTitle` chỉ dùng khi tạo group, mặc định lấy tên session. Chỉ chấp nhận `http`, `https`, `about:blank`. Chờ load event xong mới trả |
-| `find_tab` | `url` (khớp theo host, `kimi.com` khớp cả `www.kimi.com`, bỏ qua path), `active` (bool) | `tabId, url, title, borrowed` | Phải có `url`, `active:true`, hoặc cả hai. Mặc định chỉ tìm trong các tab của session. `active:true` thì mượn tab người dùng đang xem, tab đó không bị kéo vào group. Kết quả trở thành tab hiện tại của session |
-| `list_tabs` | — | `tabs: [{tabId, url, title, current, borrowed}]` | Chỉ tab của session |
-| `close_tab` | — | `closed, released` | Tab của session thì đóng. Tab đang mượn thì chỉ trả lại (detach, không đóng). Sau đó session không còn tab hiện tại |
-| `close_session` | — | `closed` (số tab) | Đóng mọi tab của session, trả lại tab mượn, xoá group |
-| `go_back` / `go_forward` / `reload` | — | `url, title` | Không có lịch sử để lùi/tiến thì trả `NAVIGATION_FAILED` |
+| `navigate` | `url` (required), `newTab` (bool, default false), `groupTitle` | `tabId, url, title` | If the session has no current tab, it always creates a new tab. New tabs open in the background (`active:false`). `groupTitle` is only used when creating the group, and defaults to the session name. Only `http`, `https`, `about:blank` are accepted. Returns only after the load event completes |
+| `find_tab` | `url` (matched by host, `kimi.com` also matches `www.kimi.com`, path ignored), `active` (bool) | `tabId, url, title, borrowed` | Requires `url`, `active:true`, or both. By default it only searches the session's own tabs. With `active:true` it borrows the tab the user is currently viewing, and that tab is not pulled into the group. The result becomes the session's current tab |
+| `list_tabs` | — | `tabs: [{tabId, url, title, current, borrowed}]` | Session tabs only |
+| `close_tab` | — | `closed, released` | A session tab is closed. A borrowed tab is only released (detached, not closed). Afterwards the session has no current tab |
+| `close_session` | — | `closed` (number of tabs) | Closes every tab of the session, releases borrowed tabs, removes the group |
+| `go_back` / `go_forward` / `reload` | — | `url, title` | If there is no history to go back/forward, return `NAVIGATION_FAILED` |
 
-### 5.2 Đọc
+### 5.2 Reading
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
-| `snapshot` | `maxChars` (mặc định 20000) | `url, title, tree, frames: [{frame, url, width, height}], truncated` |
+| `snapshot` | `maxChars` (default 20000) | `url, title, tree, frames: [{frame, url, width, height}], truncated` |
 
-Định dạng `tree`:
-- Mỗi dòng có dạng `- <role> "<name>" [state…] @e<n>`, thụt lề 2 khoảng trắng cho mỗi cấp.
-- Ref chỉ gắn cho element tương tác được.
-- Text tĩnh hiện dưới dạng `- text "…"`, mỗi đoạn cắt ở 200 ký tự.
+Format of `tree`:
+- Each line has the form `- <role> "<name>" [state…] @e<n>`, indented 2 spaces per level.
+- Refs are only attached to interactive elements.
+- Static text appears as `- text "…"`, with each paragraph cut at 200 characters.
 
 ```text
-- heading "Đăng nhập" [level=1]
+- heading "Sign in" [level=1]
 - textbox "Email" [value="a@b.com"] @e3
-- textbox "Mật khẩu" @e4
-- checkbox "Ghi nhớ" [checked] @e6
-- button "Tiếp tục" @e5
+- textbox "Password" @e4
+- checkbox "Remember me" [checked] @e6
+- button "Continue" @e5
 ```
 
-### 5.3 Thao tác
+### 5.3 Operations
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
 | `click` | `selector` | `tag, text, dialog?` |
-| `fill` | `selector`, `value` (chuỗi rỗng là xoá trắng) | `mode`: `value` hoặc `contenteditable` |
-| `select` | `selector`, và đúng một trong hai: `value` hoặc `label` | `selected: {value, label}` |
-| `press_key` | `key` (`Enter`, `Escape`, `Tab`, `ArrowDown`, `Control+A`…), `selector?` (focus vào đó trước) | `dialog?` |
-| `scroll` | `selector` (cuộn tới element) **hoặc** `direction` (`up`/`down`/`left`/`right`) + `amount` (px, mặc định 600) | `scrollX, scrollY` |
-| `upload` | `selector` (phải là `input[type=file]`), `files` (đường dẫn tuyệt đối) | `fileCount` |
+| `fill` | `selector`, `value` (an empty string clears the field) | `mode`: `value` or `contenteditable` |
+| `select` | `selector`, and exactly one of: `value` or `label` | `selected: {value, label}` |
+| `press_key` | `key` (`Enter`, `Escape`, `Tab`, `ArrowDown`, `Control+A`…), `selector?` (focus it first) | `dialog?` |
+| `scroll` | `selector` (scroll to the element) **or** `direction` (`up`/`down`/`left`/`right`) + `amount` (px, default 600) | `scrollX, scrollY` |
+| `upload` | `selector` (must be `input[type=file]`), `files` (absolute paths) | `fileCount` |
 
-`dialog?` có dạng `{type, message}`, xuất hiện khi action làm bật dialog JS (§8.6).
+`dialog?` has the form `{type, message}` and appears when the action caused a JS dialog to open (§8.6).
 
-### 5.4 Chờ
+### 5.4 Waiting
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
-| `wait_for` | Đúng một trong: `selector` (kèm `state`: `visible` mặc định, hoặc `hidden`), `text` (chuỗi con trong `innerText` của body), `urlContains`, `load: true` | `matched: true, elapsedMs` |
+| `wait_for` | Exactly one of: `selector` (with `state`: `visible` by default, or `hidden`), `text` (a substring of the body's `innerText`), `urlContains`, `load: true` | `matched: true, elapsedMs` |
 
-- Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn thì trả `TIMEOUT`.
-- Với `selector`, chưa khớp element nào là đang chờ chứ không phải lỗi, nên `wait_for` không trả `ELEMENT_NOT_FOUND`:
-  - `visible`: xong khi selector khớp một element đang hiển thị (cùng tiêu chí ẩn/hiện với snapshot, §8.3);
-  - `hidden`: xong khi không còn element nào khớp, hoặc element khớp đang bị ẩn. Ref không còn tra ra element (bị xoá, hoặc trang đã sang document khác) cũng tính là đã ẩn, không trả `STALE_REF`.
-- Lúc nào CSS khớp hơn một element thì trả `AMBIGUOUS_SELECTOR` ngay, ở cả hai state.
+- The maximum wait time is taken from the request's `timeoutMs`. If it is exceeded, return `TIMEOUT`.
+- With `selector`, matching no element yet means waiting rather than an error, so `wait_for` does not return `ELEMENT_NOT_FOUND`:
+  - `visible`: done when the selector matches a visible element (same hidden/visible criteria as the snapshot, §8.3);
+  - `hidden`: done when no element matches any more, or the matching element is hidden. A ref that no longer resolves to an element (removed, or the page moved to another document) also counts as hidden and does not return `STALE_REF`.
+- Whenever a CSS selector matches more than one element, return `AMBIGUOUS_SELECTOR` immediately, in both states.
 
-### 5.5 Chụp màn hình
+### 5.5 Screenshots
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
-| `screenshot` | `format` (`png` mặc định, hoặc `jpeg`), `quality` (0–100, chỉ áp dụng cho jpeg, mặc định 80), `selector?`, `fullPage` (bool), `path?` | `path, sizeBytes, mimeType, width, height` |
+| `screenshot` | `format` (`png` by default, or `jpeg`), `quality` (0–100, applies to jpeg only, default 80), `selector?`, `fullPage` (bool), `path?` | `path, sizeBytes, mimeType, width, height` |
 
-- Không truyền `path` thì file được ghi vào `~/.browser-bridge/artifacts/<session>-<timestamp>.<ext>`.
-- `path` do caller truyền phải là đường dẫn tuyệt đối, vì thư mục làm việc của daemon không phải của agent. Đường dẫn được dùng nguyên văn: tự tạo thư mục cha, ghi đè nếu file đã tồn tại.
+- If `path` is not passed, the file is written to `~/.browser-bridge/artifacts/<session>-<timestamp>.<ext>`.
+- A `path` passed by the caller must be an absolute path, because the daemon's working directory is not the agent's. The path is used verbatim: parent directories are created automatically, and an existing file is overwritten.
 
 ### 5.6 Network
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
-| `network_start` | `filter?` (chuỗi con của URL) | — (bắt lại từ đầu với buffer rỗng) |
+| `network_start` | `filter?` (substring of the URL) | — (starts capturing again from scratch with an empty buffer) |
 | `network_requests` | `filter?` | `capturing, count, requests: [{requestId, url, method, status, mimeType, completed}]` |
 | `network_request_detail` | `requestId` | `request: {url, method, headers, postData}`, `response: {status, headers, mimeType}`, `body`, `bodyBase64Encoded`, `bodyError?` |
-| `network_stop` | — | — (xoá buffer) |
+| `network_stop` | — | — (clears the buffer) |
 
-- Bắt theo từng tab: tab hiện tại của session, tính từ lúc gọi `network_start`.
-- Buffer giữ tối đa 500 request mỗi tab, đầy thì bỏ request cũ nhất.
-- Body tối đa 10 MB, lớn hơn thì trả `bodyError`.
+- Capture is per tab: the session's current tab, starting from the moment `network_start` is called.
+- The buffer holds at most 500 requests per tab; when full, the oldest request is dropped.
+- A body is at most 10 MB; if larger, `bodyError` is returned.
 
-### 5.7 Dialog và lối thoát cấp thấp
+### 5.7 Dialogs and the low-level escape hatches
 
-| Action | Args | Trả về `data` |
+| Action | Args | Returns `data` |
 |---|---|---|
 | `handle_dialog` | `accept` (bool), `promptText?` | `type, message` |
 | `evaluate` | `code` | `type, value` |
-| `cdp` | `method`, `params?` | response CDP nguyên gốc |
+| `cdp` | `method`, `params?` | the raw CDP response |
 
 - `evaluate`:
-  - chạy trong **main world** của trang, bật `replMode: true` (cho phép `await` ở top-level và khai báo lại `const`/`let` giữa các lần gọi), `awaitPromise`, `returnByValue`;
-  - script ném exception thì trả `EVAL_ERROR`;
-  - kết quả sau khi serialize lớn hơn 4 MB cũng trả `EVAL_ERROR`.
-- `cdp`: chạy trên tab hiện tại. Chặn các method thuộc `Browser.*` và `Target.*`, gọi vào thì trả `CDP_ERROR`.
+  - runs in the page's **main world**, with `replMode: true` (allows top-level `await` and redeclaring `const`/`let` between calls), `awaitPromise`, `returnByValue`;
+  - if the script throws an exception, return `EVAL_ERROR`;
+  - a result larger than 4 MB after serialization also returns `EVAL_ERROR`.
+- `cdp`: runs on the current tab. Methods under `Browser.*` and `Target.*` are blocked; calling them returns `CDP_ERROR`.
 
-## 6. Session, tab và ref
+## 6. Sessions, tabs and refs
 
-### 6.1 Session
+### 6.1 Sessions
 
-- Một session tương ứng với một task và một tab group.
-- Mỗi session có một **tab hiện tại**. Mọi action đơn tab đều chạy trên tab đó, chưa có thì trả `NO_CURRENT_TAB`.
-- Lệnh trong cùng session chạy tuần tự qua một hàng đợi trong daemon. Các session khác nhau chạy song song.
-- State trong extension gồm: `{session → groupId, tabIds, currentTabId, borrowedTabIds}` và bộ đếm ref của từng tab. State này lưu trong `chrome.storage.session`.
-- Khi người dùng tự đóng một tab thuộc session, tab đó được gỡ khỏi state (lắng nghe `tabs.onRemoved`). Nếu đó là tab hiện tại thì session không còn tab hiện tại.
-- **Lệnh dọn dẹp luôn chạy được:** `list_tabs`, `close_tab`, `close_session` không bao giờ bị chặn bởi `DIALOG_OPEN`, `DETACHED_BY_USER` hay `BLOCKED_HOST`, để agent luôn thoát được khỏi một tab đang kẹt.
-- **MCP:** mỗi tiến trình `bridge mcp` tự sinh một session tên `mcp-<6 ký tự ngẫu nhiên>` lúc khởi động. Tool MCP không có tham số `session`, để model nhỏ không phải lo chuyện này.
+- One session corresponds to one task and one tab group.
+- Each session has one **current tab**. Every single-tab action runs on that tab; if there is none, return `NO_CURRENT_TAB`.
+- Commands within the same session run sequentially through a queue in the daemon. Different sessions run in parallel.
+- The state in the extension consists of: `{session → groupId, tabIds, currentTabId, borrowedTabIds}` and the ref counter of each tab. This state is stored in `chrome.storage.session`.
+- When the user closes a tab that belongs to a session, that tab is removed from the state (by listening to `tabs.onRemoved`). If it was the current tab, the session has no current tab.
+- **Cleanup commands always work:** `list_tabs`, `close_tab`, `close_session` are never blocked by `DIALOG_OPEN`, `DETACHED_BY_USER` or `BLOCKED_HOST`, so the agent can always get out of a stuck tab.
+- **MCP:** each `bridge mcp` process generates a session named `mcp-<6 random characters>` at startup. MCP tools have no `session` parameter, so small models do not have to deal with it.
 
-### 6.2 Ref `@e<n>`
+### 6.2 Refs `@e<n>`
 
-- **Số ref không bao giờ dùng lại trong suốt đời một tab:**
-  - Mỗi tab có một bộ đếm chỉ tăng, lưu trong `chrome.storage.session` và giữ nguyên qua các lần navigate.
-  - Trong cùng một document, element đã có ref giữ nguyên ref đó ở các snapshot sau. Page agent giữ một `WeakMap<Element, ref>`.
-  - Element mới nhận số tiếp theo của bộ đếm.
-- Bảng tra `ref → WeakRef<Element>` nằm trong **isolated world** `bridge` của trang, nên script của trang không đọc hay sửa được.
-- Một ref không tra ra được element còn trong DOM (do đã navigate sang document khác, hoặc element bị xoá) thì trả `STALE_REF` kèm hint "Take a new snapshot". Ref không bao giờ trỏ nhầm sang element khác.
+- **A ref number is never reused during the lifetime of a tab:**
+  - Each tab has an increment-only counter, stored in `chrome.storage.session` and preserved across navigations.
+  - Within the same document, an element that already has a ref keeps that ref in later snapshots. The page agent keeps a `WeakMap<Element, ref>`.
+  - A new element gets the next number from the counter.
+- The `ref → WeakRef<Element>` lookup table lives in the page's `bridge` **isolated world**, so the page's own scripts cannot read or modify it.
+- A ref that cannot be resolved to an element still in the DOM (because the page navigated to another document, or the element was removed) returns `STALE_REF` with the hint "Take a new snapshot". A ref never points to a different element by mistake.
 
 ## 7. Security
 
-| Biện pháp | Chặn được gì |
+| Measure | What it prevents |
 |---|---|
-| Chỉ bind vào `127.0.0.1`, không có tuỳ chọn mở ra mạng ngoài | Truy cập từ máy khác |
-| `/ws` chỉ chấp nhận `Origin: chrome-extension://<id>` có trong `config.extensionIds` (mặc định là ID cố định của extension). Mỗi lúc chỉ một kết nối, kết nối thứ hai bị đóng với code 4409 | Trang web hoặc extension lạ giả làm extension |
-| HTTP từ chối mọi request có header `Origin` | Trang web gọi `fetch` tới localhost |
-| `Host` phải là `127.0.0.1:<port>` hoặc `localhost:<port>` | DNS rebinding |
-| `POST /command` bắt buộc `Content-Type: application/json` | Trình duyệt luôn phải gửi preflight, mà daemon không trả CORS nên bị chặn |
-| `config.blockedHosts` (§7.1) | Agent đi vào trang nhạy cảm, kể cả khi trang tự chuyển hướng sang đó |
-| Snapshot không bao giờ chứa giá trị ô password | Lộ mật khẩu vào context của LLM |
-| Log không ghi `value` của `fill`, `code` của `evaluate`, `promptText` | Lộ dữ liệu qua file log |
-| `SKILL.md` dặn agent coi nội dung trang là dữ liệu, không bao giờ làm theo như lệnh | Prompt injection (chỉ giảm thiểu được, không chặn hẳn) |
-| Nút "Cancel" trên thanh vàng debug của Chrome là nút dừng khẩn cấp (§8.2) | Agent chạy sai, người dùng cần cắt ngay |
+| Bind only to `127.0.0.1`, with no option to expose it to the outside network | Access from other machines |
+| `/ws` only accepts `Origin: chrome-extension://<id>` that is in `config.extensionIds` (by default the extension's fixed ID). Only one connection at a time; a second connection is closed with code 4409 | Web pages or unknown extensions impersonating the extension |
+| HTTP rejects every request that has an `Origin` header | Web pages calling `fetch` to localhost |
+| `Host` must be `127.0.0.1:<port>` or `localhost:<port>` | DNS rebinding |
+| `POST /command` requires `Content-Type: application/json` | The browser must always send a preflight, and since the daemon returns no CORS it gets blocked |
+| `config.blockedHosts` (§7.1) | The agent entering sensitive sites, even when a page redirects there on its own |
+| The snapshot never contains the value of a password field | Leaking passwords into the LLM context |
+| The log does not record the `value` of `fill`, the `code` of `evaluate`, or `promptText` | Leaking data through log files |
+| `SKILL.md` tells the agent to treat page content as data and never follow it as instructions | Prompt injection (can only be mitigated, not fully blocked) |
+| The "Cancel" button on Chrome's yellow debug bar is the emergency stop (§8.2) | An agent going wrong and the user needing to cut it off immediately |
 
-**Không dùng token, và đây là rủi ro đã chấp nhận:**
-- Token phải nằm trong một file mà agent đọc được, nên tiến trình chạy dưới cùng user cũng đọc được.
-- Như vậy token không chặn được mối đe doạ cùng user.
-- Kết luận, ghi rõ trong README: **mọi tiến trình chạy dưới user của bạn đều điều khiển được trình duyệt qua bridge.** Mức rủi ro này giống Kimi WebBridge.
+**No token is used, and this is an accepted risk:**
+- A token has to sit in a file the agent can read, so a process running under the same user can read it too.
+- So a token does not stop a same-user threat.
+- Conclusion, stated clearly in the README: **any process running under your user can control the browser through the bridge.** This level of risk is the same as Kimi WebBridge.
 
 ### 7.1 `blockedHosts`
 
-- Khớp đúng host hoặc subdomain: `bank.com` chặn cả `bank.com` lẫn `www.bank.com`.
-- Daemon đọc danh sách từ `config.json` lúc khởi động rồi gửi xuống extension trong frame `welcome` (§10). Sửa danh sách thì phải `bridge restart`.
-- Daemon kiểm tra URL của `navigate` và `find_tab` trước khi gửi lệnh xuống extension.
-- Extension kiểm tra host của tab hiện tại trước mỗi lệnh, **trừ** các lệnh dùng để rời trang (`navigate`, `find_tab`, `go_back`, `go_forward`) và lệnh dọn dẹp (§6.1). Nếu chặn cả những lệnh này thì agent bị kẹt vĩnh viễn trên tab đó.
-- Sau khi `navigate`, `go_back`, `go_forward`, `reload` load xong, extension kiểm tra lại URL cuối cùng để bắt trường hợp trang tự chuyển hướng.
-- `find_tab` không chọn tab ở host bị chặn, kể cả khi mượn bằng `active:true`.
-- Vi phạm thì trả `BLOCKED_HOST`, không kèm `url` hay `title` của trang bị chặn.
-- `blockedHosts` chỉ chặn việc vào trang và thao tác trên trang. `cdp` vẫn đọc được cookie của mọi host, kể cả host bị chặn (`Network.getAllCookies`, `Network.getCookies`, `Storage.getCookies`). Đây là rủi ro đã chấp nhận: bridge chỉ nghe trên `127.0.0.1`, và theo quyết định không dùng token ở trên, mọi tiến trình chạy dưới user của bạn vốn đã điều khiển được trình duyệt.
+- Matches the exact host or a subdomain: `bank.com` blocks both `bank.com` and `www.bank.com`.
+- The daemon reads the list from `config.json` at startup and sends it down to the extension in the `welcome` frame (§10). Editing the list requires `bridge restart`.
+- The daemon checks the URL of `navigate` and `find_tab` before sending the command down to the extension.
+- The extension checks the current tab's host before every command, **except** commands used to leave a page (`navigate`, `find_tab`, `go_back`, `go_forward`) and cleanup commands (§6.1). If these commands were blocked too, the agent would be stuck on that tab forever.
+- After `navigate`, `go_back`, `go_forward`, `reload` finish loading, the extension checks the final URL again to catch pages that redirect on their own.
+- `find_tab` does not select a tab on a blocked host, even when borrowing with `active:true`.
+- A violation returns `BLOCKED_HOST`, without the `url` or `title` of the blocked page.
+- `blockedHosts` only blocks entering pages and operating on pages. `cdp` can still read the cookies of every host, including blocked hosts (`Network.getAllCookies`, `Network.getCookies`, `Storage.getCookies`). This is an accepted risk: the bridge only listens on `127.0.0.1`, and per the decision above not to use a token, any process running under your user can already control the browser.
 
 ## 8. Extension
 
-### 8.1 Manifest và vòng đời service worker
+### 8.1 Manifest and service worker lifecycle
 
-- **Permission:** `debugger`, `tabs`, `tabGroups`, `storage`, `sidePanel`, `alarms`. Không cần `host_permissions`.
-- **ID cố định:** manifest có trường `key` (public key commit trong repo), nên ID giữ nguyên khi load unpacked trên cả Chrome lẫn Edge.
-- **Giữ SW sống:** khi còn phiên `chrome.debugger` đang attach thì Chrome không tắt SW (từ Chrome 118). Thêm ping WebSocket mỗi 20 giây.
-- **Kết nối lại:** backoff từ 1 giây lên tối đa 30 giây. Thêm `chrome.alarms` mỗi 30 giây để đánh thức SW và thử kết nối lại khi daemon chưa chạy.
-- **Khi SW khởi động lại:**
-  - đọc lại state từ `chrome.storage.session`;
-  - đối chiếu với `chrome.debugger.getTargets()` để biết tab nào còn đang attach.
+- **Permissions:** `debugger`, `tabs`, `tabGroups`, `storage`, `sidePanel`, `alarms`. No `host_permissions` are needed.
+- **Fixed ID:** the manifest has a `key` field (the public key is committed in the repo), so the ID stays the same when loaded unpacked in both Chrome and Edge.
+- **Keeping the SW alive:** as long as a `chrome.debugger` session is attached, Chrome does not shut down the SW (since Chrome 118). Add a WebSocket ping every 20 seconds.
+- **Reconnecting:** backoff from 1 second up to a maximum of 30 seconds. Add a `chrome.alarms` every 30 seconds to wake the SW and retry connecting when the daemon is not running.
+- **When the SW restarts:**
+  - re-read the state from `chrome.storage.session`;
+  - cross-check with `chrome.debugger.getTargets()` to learn which tabs are still attached.
 
-  Request đang chạy dở bị mất. Phía daemon thấy kết nối đóng thì trả `EXTENSION_NOT_CONNECTED` cho mọi request đang chờ.
+  Requests in flight are lost. When the daemon side sees the connection close, it returns `EXTENSION_NOT_CONNECTED` for every pending request.
 
-### 8.2 Executor CDP
+### 8.2 CDP executor
 
-- **Attach:** lệnh đầu tiên trên một tab mới attach (`chrome.debugger.attach`, version `1.3`), và giữ attach cho tới khi tab bị đóng, bị trả lại hoặc `close_session`.
-- **Ngay sau khi attach:** bật `Page.enable`, `Runtime.enable`, `Emulation.setFocusEmulationEnabled {enabled:true}`. Bước cuối để tab nền vẫn nhận được input thật.
-- **Khi bị detach (`chrome.debugger.onDetach`):**
+- **Attach:** the first command on a new tab attaches (`chrome.debugger.attach`, version `1.3`), and the attachment is kept until the tab is closed, released, or `close_session` is called.
+- **Right after attaching:** enable `Page.enable`, `Runtime.enable`, `Emulation.setFocusEmulationEnabled {enabled:true}`. The last step lets background tabs still receive real input.
+- **On detach (`chrome.debugger.onDetach`):**
 
-  | Lý do | Xử lý |
+  | Reason | Handling |
   |---|---|
-  | `canceled_by_user` (người dùng bấm Cancel trên thanh vàng) | Session chuyển sang trạng thái dừng. Mọi lệnh khác ngoài lệnh dọn dẹp (§6.1) trả `DETACHED_BY_USER`, cho tới khi agent gọi `navigate` hoặc `find_tab` |
-  | `target_closed` | Gỡ tab khỏi state |
+  | `canceled_by_user` (the user clicked Cancel on the yellow bar) | The session enters a stopped state. Every command other than cleanup commands (§6.1) returns `DETACHED_BY_USER`, until the agent calls `navigate` or `find_tab` |
+  | `target_closed` | Remove the tab from the state |
 
 ### 8.3 Page agent
 
-- **Inject:** một bundle IIFE, đưa vào trang bằng `Page.createIsolatedWorld {frameId: <main frame>, worldName: "bridge"}` rồi `Runtime.evaluate`.
-  - Mỗi document inject một lần (đánh dấu bằng `globalThis.__bridge`).
-  - Khi context bị huỷ thì tạo lại ở lệnh kế tiếp.
-- **API của page agent:**
+- **Injection:** an IIFE bundle, put into the page with `Page.createIsolatedWorld {frameId: <main frame>, worldName: "bridge"}` followed by `Runtime.evaluate`.
+  - Injected once per document (marked by `globalThis.__bridge`).
+  - When the context is destroyed, it is recreated on the next command.
+- **Page agent API:**
   - `snapshot(opts)`
-  - `resolve(selector) → {ok, rect, objectId?}` hoặc lỗi
+  - `resolve(selector) → {ok, rect, objectId?}` or an error
   - `checkActionable(selector)`
   - `waitFor(cond)`
 - **Snapshot:**
-  - Duyệt DOM, đi vào cả open shadow root.
-  - Bỏ qua element `display:none`, `visibility:hidden`, `aria-hidden`, hoặc có kích thước 0.
-  - Role và accessible name lấy từ `dom-accessibility-api`.
-  - State gồm: `checked`, `disabled`, `expanded`, `selected`, `level`, `value`. Riêng ô password thì không bao giờ đưa `value` vào.
+  - Walks the DOM, including open shadow roots.
+  - Skips elements that are `display:none`, `visibility:hidden`, `aria-hidden`, or have zero size.
+  - Role and accessible name come from `dom-accessibility-api`.
+  - State includes: `checked`, `disabled`, `expanded`, `selected`, `level`, `value`. For password fields specifically, `value` is never included.
 
-### 8.4 Input thật qua CDP
+### 8.4 Real input via CDP
 
-| Action | Cách làm |
+| Action | How it works |
 |---|---|
-| `click` | `scrollIntoView({block:"center"})` → kiểm tra element: còn trong DOM, có kích thước, không bị disable, `elementFromPoint(tâm)` là chính nó hoặc con của nó. Không đạt thì trả `ELEMENT_NOT_INTERACTABLE` kèm mô tả phần tử đang che → `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) tại tâm element |
-| `fill` | focus → chọn hết nội dung (`select()` với input/textarea, Selection API với contenteditable) → `Input.insertText(value)`, hoặc nhấn Delete khi `value` rỗng. Với contenteditable, đọc lại `textContent` sau khi chèn, lệch thì chọn hết và chèn lại một lần, vẫn lệch thì trả `INTERNAL` |
-| `select` | Gán `value` cho `<select>` từ isolated world → bắn sự kiện `input` và `change` (bubbles) |
-| `press_key` | `Input.dispatchKeyEvent` (`keyDown`, `char` nếu là ký tự in được, `keyUp`). Tổ hợp phím được tách theo dấu `+` |
-| `scroll` | `scrollIntoView` với `selector`, hoặc `window.scrollBy` |
-| `upload` | Lấy `objectId` của element → `DOM.describeNode` → `backendNodeId` → `DOM.setFileInputFiles`. Daemon kiểm tra mọi đường dẫn trong `files` có tồn tại trước khi gửi xuống |
+| `click` | `scrollIntoView({block:"center"})` → check the element: still in the DOM, has size, not disabled, `elementFromPoint(center)` is the element itself or its descendant. If not, return `ELEMENT_NOT_INTERACTABLE` with a description of the element covering it → `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) at the element's center |
+| `fill` | focus → select all content (`select()` for input/textarea, the Selection API for contenteditable) → `Input.insertText(value)`, or press Delete when `value` is empty. For contenteditable, read `textContent` back after inserting; if it differs, select all and insert again once; if it still differs, return `INTERNAL` |
+| `select` | Set `value` on the `<select>` from the isolated world → fire the `input` and `change` events (bubbles) |
+| `press_key` | `Input.dispatchKeyEvent` (`keyDown`, `char` if it is a printable character, `keyUp`). Key combinations are split on the `+` sign |
+| `scroll` | `scrollIntoView` with `selector`, or `window.scrollBy` |
+| `upload` | Get the element's `objectId` → `DOM.describeNode` → `backendNodeId` → `DOM.setFileInputFiles`. The daemon checks that every path in `files` exists before sending down |
 
-### 8.5 Các action còn lại
+### 8.5 The remaining actions
 
-- **`navigate`:** kiểm tra URL và `blockedHosts` → `chrome.tabs.create({active:false})` hoặc `chrome.tabs.update` → chờ `Page.loadEventFired` → kiểm tra lại `blockedHosts` với URL cuối cùng (§7.1). Tạo tab group bằng `chrome.tabs.group` + `tabGroups.update({title})`.
-- **`wait_for`:** `MutationObserver` kèm polling 100ms trong page agent. Riêng `urlContains` và `load` thì theo dõi ở service worker.
+- **`navigate`:** check the URL and `blockedHosts` → `chrome.tabs.create({active:false})` or `chrome.tabs.update` → wait for `Page.loadEventFired` → check `blockedHosts` again with the final URL (§7.1). Create the tab group with `chrome.tabs.group` + `tabGroups.update({title})`.
+- **`wait_for`:** `MutationObserver` plus 100ms polling in the page agent. `urlContains` and `load` specifically are watched in the service worker.
 - **`screenshot`:** `Page.captureScreenshot`.
-  - Có `selector` thì dùng `clip` theo khung element (sau khi `scrollIntoView`).
-  - Có `fullPage` thì bật `captureBeyondViewport: true`.
-  - Ảnh gửi về daemon dạng base64. Daemon giải mã rồi ghi ra file.
-- **Network:** `Network.enable` khi gọi `network_start`, đọc các event `requestWillBeSent`, `responseReceived`, `loadingFinished`, `loadingFailed`. Body chỉ lấy bằng `Network.getResponseBody` khi có `network_request_detail`. `Network.disable` khi `network_stop`.
+  - With `selector`, use a `clip` matching the element's frame (after `scrollIntoView`).
+  - With `fullPage`, enable `captureBeyondViewport: true`.
+  - The image is sent to the daemon as base64. The daemon decodes it and writes it to a file.
+- **Network:** `Network.enable` when `network_start` is called, reading the events `requestWillBeSent`, `responseReceived`, `loadingFinished`, `loadingFailed`. The body is only fetched with `Network.getResponseBody` when `network_request_detail` is called. `Network.disable` on `network_stop`.
 
-### 8.6 Dialog JS
+### 8.6 JS dialogs
 
-- Lắng nghe `Page.javascriptDialogOpening` và lưu dialog đang mở theo từng tab.
-- Nếu dialog bật lên **trong lúc** đang chạy `click` hoặc `press_key`, action không chờ CDP trả về nữa (CDP sẽ treo cho tới khi dialog đóng), mà trả ngay `ok` kèm `dialog: {type, message}`.
-- Khi tab đang có dialog mở, mọi lệnh khác ngoài `handle_dialog` và lệnh dọn dẹp (§6.1) đều trả `DIALOG_OPEN` kèm `{type, message}` trong hint.
-- `handle_dialog` khi không có dialog nào thì trả `NO_DIALOG`.
+- Listen to `Page.javascriptDialogOpening` and store the open dialog per tab.
+- If a dialog pops up **while** a `click` or `press_key` is running, the action stops waiting for CDP to return (CDP would hang until the dialog is closed) and immediately returns `ok` with `dialog: {type, message}`.
+- While a tab has an open dialog, every command other than `handle_dialog` and cleanup commands (§6.1) returns `DIALOG_OPEN` with `{type, message}` in the hint.
+- `handle_dialog` when there is no dialog returns `NO_DIALOG`.
 
 ### 8.7 Side panel (React)
 
-Gồm bốn phần:
-- trạng thái kết nối: địa chỉ daemon, version daemon và extension;
-- danh sách session, tab của từng session, tab hiện tại;
-- log 50 lệnh gần nhất: action, selector, thời gian chạy, mã lỗi;
-- ô cấu hình địa chỉ daemon, mặc định `ws://127.0.0.1:9876/ws`.
+Consists of four parts:
+- connection status: daemon address, daemon and extension versions;
+- the list of sessions, the tabs of each session, and the current tab;
+- a log of the last 50 commands: action, selector, run time, error code;
+- a field to configure the daemon address, default `ws://127.0.0.1:9876/ws`.
 
-## 9. Daemon và CLI
+## 9. Daemon and CLI
 
-### 9.1 Thư mục home: `%USERPROFILE%\.browser-bridge\`
+### 9.1 Home directory: `%USERPROFILE%\.browser-bridge\`
 
 ```text
 bin\bridge.exe
-extension\          bản unpacked do install.ps1 cài; đường dẫn cố định nên chỉ Load unpacked một lần
+extension\          unpacked copy installed by install.ps1; fixed path, so Load unpacked is needed only once
 config.json         {"addr": "127.0.0.1:9876", "blockedHosts": [], "extensionIds": ["<id>"]}
-daemon.pid          daemon.addr          (xoá khi daemon thoát)
+daemon.pid          daemon.addr          (deleted when the daemon exits)
 logs\daemon.log     logs\daemon.log.prev
 artifacts\
 ```
 
-- Thứ tự ưu tiên của địa chỉ: `--addr` > `config.json` > mặc định `127.0.0.1:9876`. Port 9876 khác 10086 của Kimi nên hai bên chạy song song được.
-- `config.json` sai cú pháp thì mọi subcommand báo lỗi và nêu tên file. Không âm thầm dùng giá trị mặc định.
+- Address precedence: `--addr` > `config.json` > the default `127.0.0.1:9876`. Port 9876 differs from Kimi's 10086, so the two can run side by side.
+- If `config.json` has a syntax error, every subcommand reports the error and names the file. It never silently falls back to default values.
 
-### 9.2 Subcommand
+### 9.2 Subcommands
 
-| Lệnh | Mô tả |
+| Command | Description |
 |---|---|
-| `serve` | Chạy daemon ở foreground |
-| `start` | Chạy `serve` thành tiến trình detached (`DETACHED_PROCESS` trên Windows), chờ `/status` trả ok rồi in địa chỉ. Đã chạy rồi thì không làm gì |
-| `stop` / `restart` | Gọi `POST /shutdown`, chờ tối đa 5 giây cho daemon thoát. Daemon treo thì kill theo `pid` lấy từ `/status`, không bao giờ theo file `daemon.pid` (PID cũ có thể đã thuộc tiến trình khác), và chỉ khi exe của tiến trình đó cùng tên với chính `bridge` (bất kỳ ai nghe ở địa chỉ đó đều có thể khai một `pid`). Không có daemon nào trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit code 0 khi đã dừng hoặc vốn không chạy |
-| `status` | In JSON y như `GET /status`. Daemon không chạy thì in `{"running": false, "addr": …}`. Exit code 0 khi đang chạy, 1 khi không |
-| `logs [-f] [-n N] [--prev]` | Xem log |
-| `call <action> --session <s> [--json '<args>' \| --json-file <f>] [--timeout ms]` | In envelope ra stdout. Exit code: 0 khi `ok`, 1 khi `ok:false`, 2 khi không kết nối được daemon. Go đọc argv dạng UTF-16 trên Windows nên text tiếng Việt không bị vỡ |
-| `mcp` | MCP server chạy stdio. Tự `start` daemon nếu daemon chưa chạy. Tool tên `browser_<action>`, không có tham số `session` (§6.1). `browser_screenshot` trả cả ảnh (image content của MCP) lẫn text chứa `path` |
-| `install-skill` | Copy `skill/browser-bridge/` vào `~/.claude/skills/` và `~/.codex/skills/` (bỏ qua runtime chưa cài), rồi in các lệnh cấu hình MCP: Claude Code (`claude mcp add browser-bridge -- bridge mcp`), Codex (khối `[mcp_servers.browser-bridge]` trong `config.toml`), và mẫu cho harness Ollama |
+| `serve` | Run the daemon in the foreground |
+| `start` | Run `serve` as a detached process (`DETACHED_PROCESS` on Windows), wait for `/status` to return ok, then print the address. If it is already running, do nothing |
+| `stop` / `restart` | Call `POST /shutdown` and wait up to 5 seconds for the daemon to exit. If the daemon hangs, kill it by the `pid` taken from `/status`, never by the `daemon.pid` file (a stale PID may now belong to another process), and only when that process's exe has the same name as `bridge` itself (anyone listening at that address can claim any `pid`). If no daemon answers, delete the leftover `daemon.pid`/`daemon.addr`. Exit code 0 when stopped or when it was not running to begin with |
+| `status` | Print JSON identical to `GET /status`. If the daemon is not running, print `{"running": false, "addr": …}`. Exit code 0 when running, 1 when not |
+| `logs [-f] [-n N] [--prev]` | View the log |
+| `call <action> --session <s> [--json '<args>' \| --json-file <f>] [--timeout ms]` | Print the envelope to stdout. Exit codes: 0 on `ok`, 1 on `ok:false`, 2 when it cannot connect to the daemon. Go reads argv as UTF-16 on Windows, so Vietnamese text does not get corrupted |
+| `mcp` | Stdio MCP server. Automatically `start`s the daemon if it is not running. Tools are named `browser_<action>`, with no `session` parameter (§6.1). `browser_screenshot` returns both the image (MCP image content) and text containing `path` |
+| `install-skill` | Copy `skill/browser-bridge/` into `~/.claude/skills/` and `~/.codex/skills/` (skipping runtimes that are not installed), then print the MCP configuration commands: Claude Code (`claude mcp add browser-bridge -- bridge mcp`), Codex (the `[mcp_servers.browser-bridge]` block in `config.toml`), and a template for an Ollama harness |
 
 ### 9.3 `GET /status`
 
@@ -400,106 +400,106 @@ artifacts\
 
 ### 9.4 Version
 
-- Daemon và extension dùng chung một số version, vì release cùng nhau từ một repo.
-- `protocolVersion` là số nguyên. Khi handshake mà hai bên không khớp:
-  - daemon đóng WebSocket với code 4400;
-  - `/status` hiện cả hai version;
-  - mọi lệnh trả `VERSION_MISMATCH` kèm hint nêu rõ phía nào cũ hơn.
+- The daemon and extension share one version number, because they are released together from one repo.
+- `protocolVersion` is an integer. When the two sides do not match at handshake:
+  - the daemon closes the WebSocket with code 4400;
+  - `/status` shows both versions;
+  - every command returns `VERSION_MISMATCH` with a hint stating clearly which side is older.
 
-## 10. Giao thức WebSocket giữa daemon và extension
+## 10. WebSocket protocol between daemon and extension
 
-Mọi frame là JSON text, có trường `type`.
+Every frame is JSON text with a `type` field.
 
 ```text
 ext → daemon   {type:"hello", protocolVersion, extensionVersion, extensionId, browser}
-daemon → ext   {type:"welcome", protocolVersion, daemonVersion, blockedHosts}   extension dùng blockedHosts để kiểm tra lệnh (§7.1)
+daemon → ext   {type:"welcome", protocolVersion, daemonVersion, blockedHosts}   the extension uses blockedHosts to check commands (§7.1)
 daemon → ext   {type:"request", id, session, action, args, deadline}     deadline: epoch ms
 ext → daemon   {type:"response", id, ok, data | error}
 ext → daemon   {type:"event", name, data}      tab.closed, dialog.opened, debugger.detached
-ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong"}
+ext → daemon   {type:"ping"}   every 20 seconds;     daemon → ext  {type:"pong"}
 ```
 
-- Daemon giới hạn mỗi frame tối đa 64 MB (screenshot full page dạng base64).
-- Trong MVP, event chỉ dùng cho log và side panel, chưa đưa ra cho agent.
+- The daemon limits each frame to at most 64 MB (a full-page screenshot as base64).
+- In the MVP, events are only used for the log and the side panel, and are not yet exposed to the agent.
 
-## 11. Mã lỗi
+## 11. Error codes
 
-| Code | Khi nào |
+| Code | When |
 |---|---|
-| `INVALID_REQUEST` | Sai schema, sai regex session, file upload không tồn tại, đường dẫn không tuyệt đối |
-| `UNKNOWN_ACTION` | Action không có trong danh sách |
-| `FORBIDDEN` | Không qua được kiểm tra security (§7): sai `Origin`, `Host` hoặc `Content-Type` |
-| `EXTENSION_NOT_CONNECTED` | Chưa có extension kết nối, hoặc kết nối mất giữa chừng |
-| `VERSION_MISMATCH` | Lệch `protocolVersion` |
-| `NO_CURRENT_TAB` | Session chưa có tab hiện tại |
-| `TAB_NOT_FOUND` | `find_tab` không tìm thấy, hoặc tab đã bị đóng |
-| `STALE_REF` | Ref không còn trỏ tới element nào trong DOM (trừ `wait_for` với `state: hidden`, §5.4) |
-| `ELEMENT_NOT_FOUND` | CSS selector không khớp element nào (trừ `wait_for`, §5.4) |
-| `AMBIGUOUS_SELECTOR` | CSS selector khớp nhiều hơn một element |
-| `ELEMENT_NOT_INTERACTABLE` | Element bị ẩn, bị disable, bị che, hoặc sai loại (ví dụ `upload` vào thứ không phải input file) |
-| `NAVIGATION_FAILED` | Lỗi khi navigate, hoặc không có lịch sử để lùi/tiến |
-| `RESTRICTED_URL` | `chrome://`, `edge://`, Web Store, scheme không được hỗ trợ |
-| `BLOCKED_HOST` | URL cần mở, hoặc URL của tab hiện tại, có host nằm trong `blockedHosts` (§7.1) |
-| `DIALOG_OPEN` | Tab đang có dialog JS chưa xử lý |
-| `NO_DIALOG` | `handle_dialog` khi không có dialog nào |
-| `DETACHED_BY_USER` | Người dùng đã bấm Cancel trên thanh vàng debug |
-| `TIMEOUT` | Quá `timeoutMs` |
-| `EVAL_ERROR` | Script ném exception, hoặc kết quả quá lớn |
-| `CDP_ERROR` | CDP trả lỗi, hoặc method bị chặn |
-| `INTERNAL` | Lỗi không lường trước. Message chứa chi tiết để debug |
+| `INVALID_REQUEST` | Wrong schema, wrong session regex, upload file does not exist, path is not absolute |
+| `UNKNOWN_ACTION` | The action is not in the list |
+| `FORBIDDEN` | Fails the security checks (§7): wrong `Origin`, `Host` or `Content-Type` |
+| `EXTENSION_NOT_CONNECTED` | No extension is connected yet, or the connection was lost midway |
+| `VERSION_MISMATCH` | `protocolVersion` mismatch |
+| `NO_CURRENT_TAB` | The session has no current tab |
+| `TAB_NOT_FOUND` | `find_tab` found nothing, or the tab has been closed |
+| `STALE_REF` | The ref no longer points to any element in the DOM (except `wait_for` with `state: hidden`, §5.4) |
+| `ELEMENT_NOT_FOUND` | The CSS selector matches no element (except `wait_for`, §5.4) |
+| `AMBIGUOUS_SELECTOR` | The CSS selector matches more than one element |
+| `ELEMENT_NOT_INTERACTABLE` | The element is hidden, disabled, covered, or of the wrong type (for example `upload` into something that is not a file input) |
+| `NAVIGATION_FAILED` | An error while navigating, or there is no history to go back/forward |
+| `RESTRICTED_URL` | `chrome://`, `edge://`, the Web Store, unsupported schemes |
+| `BLOCKED_HOST` | The URL to open, or the URL of the current tab, has a host in `blockedHosts` (§7.1) |
+| `DIALOG_OPEN` | The tab has a JS dialog that has not been handled |
+| `NO_DIALOG` | `handle_dialog` when there is no dialog |
+| `DETACHED_BY_USER` | The user clicked Cancel on the yellow debug bar |
+| `TIMEOUT` | `timeoutMs` exceeded |
+| `EVAL_ERROR` | The script threw an exception, or the result is too large |
+| `CDP_ERROR` | CDP returned an error, or the method is blocked |
+| `INTERNAL` | An unexpected error. The message contains details for debugging |
 
 ## 12. Testing
 
 - **Go (`go test`):**
-  - validate schema;
-  - hàng đợi của session và timeout;
-  - các kiểm tra Origin, Host, Content-Type;
-  - fail toàn bộ request đang chờ khi extension mất kết nối;
-  - `/tools` và danh sách tool MCP.
+  - schema validation;
+  - the session queue and timeouts;
+  - the Origin, Host and Content-Type checks;
+  - failing all pending requests when the extension loses its connection;
+  - `/tools` and the MCP tool list.
 
-  Dùng một **extension giả viết bằng Go** (WebSocket client) để test WebSocket hub mà không cần mở trình duyệt.
+  Use a **fake extension written in Go** (a WebSocket client) to test the WebSocket hub without opening a browser.
 - **E2E (Playwright, TypeScript):**
-  - Chạy trên Chromium hoặc Chrome for Testing. Chrome bản thường từ 137 đã bỏ cờ `--load-extension`.
-  - Load extension bằng `launchPersistentContext` với `--load-extension`, bật `bridge serve` trên một port ngẫu nhiên, gọi lệnh qua HTTP.
-  - Daemon của E2E chạy ở cổng 19876, và extension được build bằng `--mode e2e` với địa chỉ đó compile sẵn (`WXT_DAEMON_URL`), nên một lần chạy test không bao giờ nối vào daemon thật ở 9876.
-  - Mỗi action có ít nhất một test chạy đúng và một test lỗi.
+  - Runs on Chromium or Chrome for Testing. Regular Chrome since 137 has dropped the `--load-extension` flag.
+  - Load the extension with `launchPersistentContext` using `--load-extension`, start `bridge serve` on a random port, and issue commands over HTTP.
+  - The E2E daemon runs on port 19876, and the extension is built with `--mode e2e` with that address compiled in (`WXT_DAEMON_URL`), so a test run never connects to the real daemon at 9876.
+  - Each action has at least one test for success and one for failure.
 - **`testpage/`:**
-  - các loại ô nhập: input, textarea, contenteditable (một editor kiểu ProseMirror), React controlled input, `<select>`, checkbox, radio, input file;
-  - link sang trang thứ hai (để test back/forward);
-  - nút bật `alert`, `confirm`, `prompt`;
-  - element hiện ra sau 1 giây và element biến mất sau 1 giây (để test `wait_for` với `visible` và `hidden`);
-  - hai nút cùng class (để test `AMBIGUOUS_SELECTOR`);
-  - link chuyển hướng sang một host nằm trong `blockedHosts` của bộ test (để test `BLOCKED_HOST` khi trang tự chuyển hướng);
-  - nút bị overlay che (để test `ELEMENT_NOT_INTERACTABLE`);
-  - element bị xoá khỏi DOM (để test `STALE_REF`);
-  - `fetch` tới API JSON local (để test network);
-  - một iframe (để kiểm tra snapshot liệt kê frame);
-  - ô password (để kiểm tra snapshot không lộ giá trị).
-- **Smoke test tay** theo checklist 4 use case (§1.1) trên Chrome thật đang đăng nhập, với từng consumer (§1.2).
+  - the kinds of input fields: input, textarea, contenteditable (a ProseMirror-style editor), React controlled input, `<select>`, checkbox, radio, input file;
+  - a link to a second page (to test back/forward);
+  - buttons that trigger `alert`, `confirm`, `prompt`;
+  - an element that appears after 1 second and an element that disappears after 1 second (to test `wait_for` with `visible` and `hidden`);
+  - two buttons with the same class (to test `AMBIGUOUS_SELECTOR`);
+  - a link that redirects to a host in the test suite's `blockedHosts` (to test `BLOCKED_HOST` when the page redirects on its own);
+  - a button covered by an overlay (to test `ELEMENT_NOT_INTERACTABLE`);
+  - an element removed from the DOM (to test `STALE_REF`);
+  - a `fetch` to a local JSON API (to test network);
+  - an iframe (to check that the snapshot lists frames);
+  - a password field (to check that the snapshot does not leak the value).
+- **Manual smoke test** following the checklist of the 4 use cases (§1.1) on a real, logged-in Chrome, with each consumer (§1.2).
 
-## 13. Thứ tự triển khai
+## 13. Implementation order
 
-0. **Spike (khoảng 1 ngày, code bỏ đi sau khi xong):** trên tab nền đã bật focus emulation, kiểm tra ba điều:
-   - `Input.dispatchMouseEvent` có tới được element không;
-   - `Input.insertText` có chạy với input thường, React controlled input và editor contenteditable không;
-   - `Page.captureScreenshot` có chụp được không.
+0. **Spike (about 1 day, throwaway code once done):** on a background tab with focus emulation enabled, verify three things:
+   - whether `Input.dispatchMouseEvent` reaches the element;
+   - whether `Input.insertText` works with plain inputs, React controlled inputs and contenteditable editors;
+   - whether `Page.captureScreenshot` can capture.
 
-   Thất bại thì đổi hướng: `click` dùng `el.click()`, `fill` dùng native setter kèm sự kiện giả, và tab mở ở chế độ `active:true`. Cập nhật lại spec trước khi làm tiếp.
+   If it fails, change direction: `click` uses `el.click()`, `fill` uses the native setter plus synthetic events, and tabs are opened with `active:true`. Update the spec before continuing.
 
-   **Kết quả (2026-10-06, Chromium 153 do Playwright cài, load extension bằng `--load-extension`, Windows 11):** cả ba điều đều chạy trên tab nền, không cần đổi hướng. Mọi check (click, gõ vào input thường, React controlled input, ProseMirror, `Enter`, chụp màn hình) PASS, và tab nền vẫn ở nền, không cướp focus của tab người dùng. Chạy 5 lần, 4 lần sạch hoàn toàn. Lần còn lại, ở tab nền có focus emulation, chọn hết nội dung ProseMirror bằng Selection API rồi `Input.insertText` chèn thêm vào thay vì thay thế ("pm okpm replaced"). Vì vậy `fill` cho contenteditable phải đọc lại nội dung sau khi chèn, và thử lại một lần nếu chưa khớp (§8.4). Chưa kiểm chứng: Chrome stable hằng ngày, và cửa sổ mất focus hay bị minimize. Hai điều này cần chạy lại spike bằng tay trên Chrome thật trước khi phát hành.
-1. Go struct cho protocol, `schemagen`, khung daemon (HTTP, các kiểm tra security, WebSocket hub, hàng đợi session), test bằng extension giả.
-2. Khung extension: kết nối, handshake, keepalive, kết nối lại, session/tab group, `navigate`/`find_tab`/`list_tabs`/`close_*`/back/forward/reload, side panel hiển thị trạng thái.
-3. Page agent: snapshot và ref, rồi `click`, `fill`, `select`, `press_key`, `scroll`, `wait_for`, kèm testpage và E2E.
-4. `screenshot`, `upload`, dialog, network, `evaluate`, `cdp`.
+   **Result (2026-10-06, Chromium 153 installed by Playwright, extension loaded with `--load-extension`, Windows 11):** all three work on a background tab, with no change of direction needed. Every check (click, typing into a plain input, React controlled input, ProseMirror, `Enter`, screenshot) PASSED, and the background tab stayed in the background, without stealing focus from the user's tab. Run 5 times, 4 were completely clean. In the remaining run, on a background tab with focus emulation, selecting all ProseMirror content with the Selection API and then calling `Input.insertText` inserted additional text instead of replacing it ("pm okpm replaced"). So `fill` for contenteditable must read the content back after inserting, and retry once if it does not match (§8.4). Not yet verified: everyday stable Chrome, and a window that has lost focus or is minimized. These two need the spike to be rerun manually on real Chrome before release.
+1. Go structs for the protocol, `schemagen`, the daemon skeleton (HTTP, security checks, WebSocket hub, session queue), tested with the fake extension.
+2. Extension skeleton: connection, handshake, keepalive, reconnect, session/tab group, `navigate`/`find_tab`/`list_tabs`/`close_*`/back/forward/reload, a side panel showing status.
+3. Page agent: snapshot and ref, then `click`, `fill`, `select`, `press_key`, `scroll`, `wait_for`, together with the testpage and E2E.
+4. `screenshot`, `upload`, dialogs, network, `evaluate`, `cdp`.
 5. CLI: `start`/`stop`/`status`/`logs`/`call`, `mcp`, `SKILL.md`, `install-skill`.
-6. Hoàn thiện: `blockedHosts`, ẩn dữ liệu nhạy cảm trong log, smoke test với 3 consumer.
+6. Polish: `blockedHosts`, hiding sensitive data in logs, smoke tests with the 3 consumers.
 
-## 14. Rủi ro
+## 14. Risks
 
-| Rủi ro | Giảm thiểu |
+| Risk | Mitigation |
 |---|---|
-| Input thật qua CDP không tới được tab nền | Spike 2026-10-06 đạt trên Chromium 153 (§13 bước 0). Còn phải xác nhận trên Chrome stable khi cửa sổ mất focus hoặc bị minimize |
-| Thanh vàng "đang debug trình duyệt" gây phiền | Chấp nhận, vì nó cũng là tín hiệu cho biết tab đang bị điều khiển và đóng vai trò nút dừng khẩn cấp. Không dùng cờ `--silent-debugger-extension-api` |
-| Model local nhỏ gọi tool sai | Mỗi tool một schema phẳng, có `hint` trong lỗi, MCP không bắt truyền session |
-| Prompt injection từ nội dung trang | Có `blockedHosts`, `SKILL.md` cảnh báo agent, và nút Cancel để dừng ngay. Không chặn hoàn toàn được |
-| Trang chặn CDP hoặc phát hiện automation | Ngoài phạm vi MVP. Ghi nhận lại khi gặp |
+| Real input via CDP does not reach background tabs | The 2026-10-06 spike passed on Chromium 153 (§13 step 0). Still to be confirmed on stable Chrome when the window loses focus or is minimized |
+| The yellow "debugging this browser" bar is annoying | Accepted, since it is also the signal that a tab is being controlled and serves as the emergency stop. Do not use the `--silent-debugger-extension-api` flag |
+| Small local models call tools incorrectly | One flat schema per tool, a `hint` in errors, and MCP does not require passing a session |
+| Prompt injection from page content | There is `blockedHosts`, `SKILL.md` warns the agent, and the Cancel button stops it immediately. It cannot be fully blocked |
+| Pages that block CDP or detect automation | Out of scope for the MVP. Record it when encountered |
