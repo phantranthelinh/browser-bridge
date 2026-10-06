@@ -115,7 +115,7 @@ Script dùng `start`, `stop`, `status`. Ba lệnh này cùng `restart` được 
 
 - **Địa chỉ:** đọc `daemon.addr` nếu có; nếu không thì `--addr` > `config.json` > `127.0.0.1:9876`.
 - **`start`:** `/status` đã trả lời thì in "already running" và exit 0. Nếu chưa, chạy chính exe này với `serve` thành tiến trình tách rời (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`, không cửa sổ, stdout/stderr bỏ đi) và chờ tối đa 5 giây cho `/status`. Hỏng thì in các dòng cuối của `logs\daemon.log` và exit 1.
-- **`stop`:** `POST /shutdown`, chờ tối đa 5 giây. Daemon treo thì kill theo `pid` của `/status`, không bao giờ theo file `daemon.pid`. Không ai trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit 0.
+- **`stop`:** `POST /shutdown`, chờ tối đa 5 giây. Daemon treo thì kill theo `pid` của `/status`, không bao giờ theo file `daemon.pid`, và chỉ khi exe của `pid` đó cùng tên với chính `bridge`; nếu không, `stop` từ chối và exit 1. Không ai trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit 0.
 - **`restart`:** `stop` rồi `start`.
 - **`status`:** in JSON của `/status` (đã có `pid`), hoặc `{"running": false, "addr": …}`. Exit 0 khi chạy, 1 khi không.
 

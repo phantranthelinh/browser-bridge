@@ -157,6 +157,10 @@ func stopCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer proc.close()
+	if err := checkIsBridge(proc, st.PID); err != nil {
+		fmt.Fprintf(stderr, "bridge: %v; not stopping it\n", err)
+		return 1
+	}
 	if err := requestShutdown(addr); err != nil {
 		fmt.Fprintln(stderr, "bridge: shutdown request failed, killing the daemon:", err)
 	} else if proc.wait(stopTimeout) {
@@ -171,6 +175,25 @@ func stopCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "bridge: could not stop the daemon (pid %d)\n", st.PID)
 	return 1
+}
+
+// checkIsBridge guards the kill in stopCmd. Whatever answers on the daemon's address names the
+// pid, and nothing proves that answer came from bridge; without this, a bridge stop run from an
+// admin shell could be steered into killing any process. Only a process running an executable
+// with our own name is touched.
+func checkIsBridge(p *daemonProcess, pid int) error {
+	path, err := p.imagePath()
+	if err != nil {
+		return fmt.Errorf("cannot read the executable of pid %d: %v", pid, err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(filepath.Base(path), filepath.Base(self)) {
+		return fmt.Errorf("pid %d named by /status runs %s, not %s", pid, path, filepath.Base(self))
+	}
+	return nil
 }
 
 func restartCmd(args []string, stdout, stderr io.Writer) int {

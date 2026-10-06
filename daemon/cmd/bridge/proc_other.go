@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -17,6 +18,15 @@ func detach(cmd *exec.Cmd) {
 }
 
 type daemonProcess struct{ p *os.Process }
+
+// imagePath reads /proc where it exists. Elsewhere it reports our own executable, so the check in
+// stopCmd passes: those platforms are not supported anyway.
+func (p *daemonProcess) imagePath() (string, error) {
+	if path, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", p.p.Pid)); err == nil {
+		return path, nil
+	}
+	return os.Executable()
+}
 
 func openProcess(pid int) (*daemonProcess, error) {
 	p, err := os.FindProcess(pid)

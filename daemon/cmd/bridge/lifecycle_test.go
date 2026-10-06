@@ -21,6 +21,11 @@ import (
 var bridgeBin string
 
 func TestMain(m *testing.M) {
+	if os.Getenv("BRIDGE_TEST_HELPER") == "sleep" {
+		// A long-running process that is not bridge, for TestStopRefusesAProcessThatIsNotBridge.
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	dir, err := os.MkdirTemp("", "bridge-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -182,28 +187,29 @@ func TestRestartReplacesTheDaemon(t *testing.T) {
 	}
 }
 
-// A daemon that answers /status but never exits after /shutdown must be killed, and only the
-// process /status names.
-func TestStopKillsADaemonThatIgnoresShutdown(t *testing.T) {
-	dir, _ := newHome(t)
-
-	// The stuck daemon: a real bridge serve in its own home. The test answers /status for it.
-	stuckHome := t.TempDir()
-	stuck := exec.Command(bridgeBin, "serve", "--addr", freeAddr(t))
-	stuck.Env = append(os.Environ(), "BRIDGE_HOME="+stuckHome)
-	if err := stuck.Start(); err != nil {
+// startChild starts cmd and returns a channel closed once it exits. The child is killed at the
+// end of the test.
+func startChild(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+	t.Helper()
+	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	gone := make(chan struct{})
 	go func() {
-		stuck.Wait()
+		cmd.Wait()
 		close(gone)
 	}()
 	t.Cleanup(func() {
-		stuck.Process.Kill()
+		cmd.Process.Kill()
 		<-gone
 	})
+	return gone
+}
 
+// fakeDaemon answers on dir's daemon.addr like a hung daemon: /status names pid until that process
+// exits, and /shutdown answers 200 without doing anything.
+func fakeDaemon(t *testing.T, dir string, pid int, gone <-chan struct{}) {
+	t.Helper()
 	fake := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-gone:
@@ -212,9 +218,8 @@ func TestStopKillsADaemonThatIgnoresShutdown(t *testing.T) {
 		default:
 		}
 		if r.URL.Path == "/status" {
-			fmt.Fprintf(w, `{"running":true,"pid":%d}`, stuck.Process.Pid)
+			fmt.Fprintf(w, `{"running":true,"pid":%d}`, pid)
 		}
-		// /shutdown: answered 200 with nothing done, like a hung daemon.
 	})}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -223,6 +228,16 @@ func TestStopKillsADaemonThatIgnoresShutdown(t *testing.T) {
 	go fake.Serve(ln)
 	t.Cleanup(func() { fake.Close() })
 	os.WriteFile(filepath.Join(dir, "daemon.addr"), []byte(ln.Addr().String()), 0o644)
+}
+
+// A daemon that answers /status but never exits after /shutdown must be killed, and only the
+// process /status names.
+func TestStopKillsADaemonThatIgnoresShutdown(t *testing.T) {
+	dir, _ := newHome(t)
+	stuck := exec.Command(bridgeBin, "serve", "--addr", freeAddr(t))
+	stuck.Env = append(os.Environ(), "BRIDGE_HOME="+t.TempDir())
+	gone := startChild(t, stuck)
+	fakeDaemon(t, dir, stuck.Process.Pid, gone)
 
 	start := time.Now()
 	out, code := runBridge(t, dir, "stop")
@@ -236,5 +251,25 @@ func TestStopKillsADaemonThatIgnoresShutdown(t *testing.T) {
 	}
 	if took := time.Since(start); took < stopTimeout {
 		t.Fatalf("stop killed after %v, before giving the daemon %v to exit", took, stopTimeout)
+	}
+}
+
+// Whatever answers on the daemon's address could name any pid; stop must not touch a process
+// that does not run bridge.
+func TestStopRefusesAProcessThatIsNotBridge(t *testing.T) {
+	dir, _ := newHome(t)
+	other := exec.Command(os.Args[0])
+	other.Env = append(os.Environ(), "BRIDGE_TEST_HELPER=sleep")
+	gone := startChild(t, other)
+	fakeDaemon(t, dir, other.Process.Pid, gone)
+
+	out, code := runBridge(t, dir, "stop")
+	if code != 1 || !strings.Contains(out, "not stopping it") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	select {
+	case <-gone:
+		t.Fatal("stop killed a process that does not run bridge")
+	case <-time.After(500 * time.Millisecond):
 	}
 }

@@ -6,11 +6,17 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
-// DETACHED_PROCESS: the daemon gets no console and does not belong to the terminal that ran
-// bridge start, so closing that terminal does not stop it.
-const detachedProcess = 0x00000008
+const (
+	// DETACHED_PROCESS: the daemon gets no console and does not belong to the terminal that ran
+	// bridge start, so closing that terminal does not stop it.
+	detachedProcess                = 0x00000008
+	processQueryLimitedInformation = 0x00001000
+)
+
+var procQueryFullProcessImageName = syscall.NewLazyDLL("kernel32.dll").NewProc("QueryFullProcessImageNameW")
 
 func detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -25,7 +31,7 @@ func detach(cmd *exec.Cmd) {
 type daemonProcess struct{ h syscall.Handle }
 
 func openProcess(pid int) (*daemonProcess, error) {
-	h, err := syscall.OpenProcess(syscall.SYNCHRONIZE|syscall.PROCESS_TERMINATE, false, uint32(pid))
+	h, err := syscall.OpenProcess(syscall.SYNCHRONIZE|syscall.PROCESS_TERMINATE|processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +42,17 @@ func openProcess(pid int) (*daemonProcess, error) {
 func (p *daemonProcess) wait(d time.Duration) bool {
 	ev, err := syscall.WaitForSingleObject(p.h, uint32(d.Milliseconds()))
 	return err == nil && ev == syscall.WAIT_OBJECT_0
+}
+
+// imagePath is the full path of the executable the process runs.
+func (p *daemonProcess) imagePath() (string, error) {
+	buf := make([]uint16, 1024)
+	n := uint32(len(buf))
+	ok, _, err := procQueryFullProcessImageName.Call(uintptr(p.h), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&n)))
+	if ok == 0 {
+		return "", err
+	}
+	return syscall.UTF16ToString(buf[:n]), nil
 }
 
 func (p *daemonProcess) kill() error { return syscall.TerminateProcess(p.h, 1) }

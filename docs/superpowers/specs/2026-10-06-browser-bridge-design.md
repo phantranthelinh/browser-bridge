@@ -381,7 +381,7 @@ artifacts\
 |---|---|
 | `serve` | Chạy daemon ở foreground |
 | `start` | Chạy `serve` thành tiến trình detached (`DETACHED_PROCESS` trên Windows), chờ `/status` trả ok rồi in địa chỉ. Đã chạy rồi thì không làm gì |
-| `stop` / `restart` | Gọi `POST /shutdown`, chờ tối đa 5 giây cho daemon thoát. Daemon treo thì kill theo `pid` lấy từ `/status`, không bao giờ theo file `daemon.pid` (PID cũ có thể đã thuộc tiến trình khác). Không có daemon nào trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit code 0 khi đã dừng hoặc vốn không chạy |
+| `stop` / `restart` | Gọi `POST /shutdown`, chờ tối đa 5 giây cho daemon thoát. Daemon treo thì kill theo `pid` lấy từ `/status`, không bao giờ theo file `daemon.pid` (PID cũ có thể đã thuộc tiến trình khác), và chỉ khi exe của tiến trình đó cùng tên với chính `bridge` (bất kỳ ai nghe ở địa chỉ đó đều có thể khai một `pid`). Không có daemon nào trả lời thì xoá `daemon.pid`/`daemon.addr` còn sót. Exit code 0 khi đã dừng hoặc vốn không chạy |
 | `status` | In JSON y như `GET /status`. Daemon không chạy thì in `{"running": false, "addr": …}`. Exit code 0 khi đang chạy, 1 khi không |
 | `logs [-f] [-n N] [--prev]` | Xem log |
 | `call <action> --session <s> [--json '<args>' \| --json-file <f>] [--timeout ms]` | In envelope ra stdout. Exit code: 0 khi `ok`, 1 khi `ok:false`, 2 khi không kết nối được daemon. Go đọc argv dạng UTF-16 trên Windows nên text tiếng Việt không bị vỡ |
