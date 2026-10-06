@@ -326,7 +326,7 @@ daemon/internal/protocol (Go struct + description)
 | Action | Cách làm |
 |---|---|
 | `click` | `scrollIntoView({block:"center"})` → kiểm tra element: còn trong DOM, có kích thước, không bị disable, `elementFromPoint(tâm)` là chính nó hoặc con của nó. Không đạt thì trả `ELEMENT_NOT_INTERACTABLE` kèm mô tả phần tử đang che → `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) tại tâm element |
-| `fill` | focus → chọn hết nội dung (`select()` với input/textarea, Selection API với contenteditable) → `Input.insertText(value)`, hoặc nhấn Delete khi `value` rỗng |
+| `fill` | focus → chọn hết nội dung (`select()` với input/textarea, Selection API với contenteditable) → `Input.insertText(value)`, hoặc nhấn Delete khi `value` rỗng. Với contenteditable, đọc lại `textContent` sau khi chèn, lệch thì chọn hết và chèn lại một lần, vẫn lệch thì trả `INTERNAL` |
 | `select` | Gán `value` cho `<select>` từ isolated world → bắn sự kiện `input` và `change` (bubbles) |
 | `press_key` | `Input.dispatchKeyEvent` (`keyDown`, `char` nếu là ký tự in được, `keyUp`). Tổ hợp phím được tách theo dấu `+` |
 | `scroll` | `scrollIntoView` với `selector`, hoặc `window.scrollBy` |
@@ -481,6 +481,8 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
    - `Page.captureScreenshot` có chụp được không.
 
    Thất bại thì đổi hướng: `click` dùng `el.click()`, `fill` dùng native setter kèm sự kiện giả, và tab mở ở chế độ `active:true`. Cập nhật lại spec trước khi làm tiếp.
+
+   **Kết quả (2026-10-06, Chromium 153 do Playwright cài, load extension bằng `--load-extension`, Windows 11):** cả ba điều đều chạy trên tab nền, không cần đổi hướng. Mọi check (click, gõ vào input thường, React controlled input, ProseMirror, `Enter`, chụp màn hình) PASS, và tab nền vẫn ở nền, không cướp focus của tab người dùng. Chạy 5 lần, 4 lần sạch hoàn toàn. Lần còn lại, ở tab nền có focus emulation, chọn hết nội dung ProseMirror bằng Selection API rồi `Input.insertText` chèn thêm vào thay vì thay thế ("pm okpm replaced"). Vì vậy `fill` cho contenteditable phải đọc lại nội dung sau khi chèn, và thử lại một lần nếu chưa khớp (§8.4). Chưa kiểm chứng: Chrome stable hằng ngày, và cửa sổ mất focus hay bị minimize. Hai điều này cần chạy lại spike bằng tay trên Chrome thật trước khi phát hành.
 1. Go struct cho protocol, `schemagen`, khung daemon (HTTP, các kiểm tra security, WebSocket hub, hàng đợi session), test bằng extension giả.
 2. Khung extension: kết nối, handshake, keepalive, kết nối lại, session/tab group, `navigate`/`find_tab`/`list_tabs`/`close_*`/back/forward/reload, side panel hiển thị trạng thái.
 3. Page agent: snapshot và ref, rồi `click`, `fill`, `select`, `press_key`, `scroll`, `wait_for`, kèm testpage và E2E.
@@ -492,7 +494,7 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
 
 | Rủi ro | Giảm thiểu |
 |---|---|
-| Input thật qua CDP không tới được tab nền | Spike ở bước 0, có sẵn phương án đổi hướng |
+| Input thật qua CDP không tới được tab nền | Spike 2026-10-06 đạt trên Chromium 153 (§13 bước 0). Còn phải xác nhận trên Chrome stable khi cửa sổ mất focus hoặc bị minimize |
 | Thanh vàng "đang debug trình duyệt" gây phiền | Chấp nhận, vì nó cũng là tín hiệu cho biết tab đang bị điều khiển và đóng vai trò nút dừng khẩn cấp. Không dùng cờ `--silent-debugger-extension-api` |
 | Model local nhỏ gọi tool sai | Mỗi tool một schema phẳng, có `hint` trong lỗi, MCP không bắt truyền session |
 | Prompt injection từ nội dung trang | Có `blockedHosts`, `SKILL.md` cảnh báo agent, và nút Cancel để dừng ngay. Không chặn hoàn toàn được |
