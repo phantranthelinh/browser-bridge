@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Browser Bridge</title>
+    <style>
+      body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px; color: #1f2328; }
+      h2 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; color: #59636e; }
+      .state { font-weight: 600; }
+      .state.connected { color: #1a7f37; }
+      .state.disconnected { color: #cf222e; }
+      .error { color: #cf222e; }
+      .muted { color: #59636e; }
+      ul { margin: 4px 0; padding-left: 18px; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: 2px 4px; border-bottom: 1px solid #eaeef2; vertical-align: top; word-break: break-all; }
+      form { display: flex; gap: 6px; }
+      input { flex: 1; font: inherit; padding: 4px; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #e6edf3; }
+        td { border-color: #30363d; }
+        .muted, h2 { color: #9198a1; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
