@@ -81,8 +81,9 @@ func TestServeRefusesBadConfig(t *testing.T) {
 	}
 }
 
-func TestServeRefusesBusyPort(t *testing.T) {
-	t.Setenv("BRIDGE_HOME", t.TempDir())
+func TestServeRefusesBusyPortAndLogsWhy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BRIDGE_HOME", dir)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +92,45 @@ func TestServeRefusesBusyPort(t *testing.T) {
 	var stderr bytes.Buffer
 	if code := serve(context.Background(), []string{"--addr", ln.Addr().String()}, &stderr); code != 1 {
 		t.Fatalf("exit code %d", code)
+	}
+	// bridge start discards stderr, so the reason has to be in the log file.
+	if b, _ := os.ReadFile(filepath.Join(dir, "logs", "daemon.log")); !strings.Contains(string(b), "cannot listen") {
+		t.Fatalf("log = %s", b)
+	}
+}
+
+func TestServeStopsOnShutdownRequest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BRIDGE_HOME", dir)
+	addr := freeAddr(t)
+	done := make(chan int)
+	var stderr bytes.Buffer
+	go func() { done <- serve(context.Background(), []string{"--addr", addr}, &stderr) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		res, err := http.Post("http://"+addr+"/shutdown", "application/json", strings.NewReader("{}"))
+		if err == nil {
+			res.Body.Close()
+			if res.StatusCode != 200 {
+				t.Fatalf("shutdown answered %d", res.StatusCode)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon never answered: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code %d\n%s", code, stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after /shutdown")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "daemon.addr")); !os.IsNotExist(err) {
+		t.Fatal("daemon.addr left behind")
 	}
 }
 

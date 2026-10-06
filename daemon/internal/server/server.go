@@ -8,7 +8,9 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/phantranthelinh/browser-bridge/daemon/internal/home"
@@ -20,25 +22,30 @@ type Options struct {
 	Config       home.Config
 	ArtifactsDir string
 	Log          *slog.Logger
+	// OnShutdown is called once when POST /shutdown arrives, after the reply is written.
+	OnShutdown func()
 }
 
 type Server struct {
-	cfg       home.Config
-	artifacts string
-	log       *slog.Logger
-	hub       *Hub
-	queues    *session.Queues
-	started   time.Time
+	cfg        home.Config
+	artifacts  string
+	log        *slog.Logger
+	hub        *Hub
+	queues     *session.Queues
+	started    time.Time
+	onShutdown func()
+	shutdown   sync.Once
 }
 
 func New(opt Options) *Server {
 	return &Server{
-		cfg:       opt.Config,
-		artifacts: opt.ArtifactsDir,
-		log:       opt.Log,
-		hub:       NewHub(opt.Config.BlockedHosts, opt.Log),
-		queues:    session.New(),
-		started:   time.Now(),
+		cfg:        opt.Config,
+		artifacts:  opt.ArtifactsDir,
+		log:        opt.Log,
+		hub:        NewHub(opt.Config.BlockedHosts, opt.Log),
+		queues:     session.New(),
+		started:    time.Now(),
+		onShutdown: opt.OnShutdown,
 	}
 }
 
@@ -48,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tools", s.handleTools)
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /ws", s.hub.ServeWS)
+	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, protocol.ErrInvalidRequest, r.Method+" "+r.URL.Path+" does not exist", "Use POST /command, GET /tools or GET /status")
 	})
@@ -151,6 +159,7 @@ type statusBody struct {
 	Version         string          `json:"version"`
 	ProtocolVersion int             `json:"protocolVersion"`
 	Port            int             `json:"port"`
+	PID             int             `json:"pid"`
 	UptimeSeconds   int64           `json:"uptimeSeconds"`
 	Extension       ExtensionStatus `json:"extension"`
 	Sessions        int             `json:"sessions"`
@@ -163,8 +172,21 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Version:         protocol.Version,
 		ProtocolVersion: protocol.ProtocolVersion,
 		Port:            port,
+		PID:             os.Getpid(),
 		UptimeSeconds:   int64(time.Since(s.started).Seconds()),
 		Extension:       s.hub.Status(),
 		Sessions:        s.queues.Count(),
+	})
+}
+
+// handleShutdown replies before stopping, so bridge stop gets a clean 200 rather than a dropped
+// connection.
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	writeEnvelope(w, protocol.Response{OK: true, Data: json.RawMessage("{}")})
+	s.shutdown.Do(func() {
+		s.log.Info("shutdown requested")
+		if s.onShutdown != nil {
+			s.onShutdown()
+		}
 	})
 }

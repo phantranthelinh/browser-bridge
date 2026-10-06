@@ -74,18 +74,22 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	defer logFile.Close()
 	log := slog.New(slog.NewTextHandler(io.MultiWriter(logFile, stderr), nil))
 
+	// From here on errors go to the log too: under bridge start stderr is discarded, and start
+	// shows the end of the log when the daemon fails to come up.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Fprintf(stderr, "bridge: cannot listen on %s (is another daemon running?): %v\n", addr, err)
+		log.Error("cannot listen (is another daemon running?)", "addr", addr, "err", err)
 		return 1
 	}
 	if err := home.WriteRuntimeFiles(dir, os.Getpid(), ln.Addr().String()); err != nil {
-		fmt.Fprintln(stderr, "bridge:", err)
+		log.Error("cannot write runtime files", "err", err)
 		return 1
 	}
 	defer home.RemoveRuntimeFiles(dir)
 
-	srv := server.New(server.Options{Config: cfg, ArtifactsDir: home.ArtifactsDir(dir), Log: log})
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	srv := server.New(server.Options{Config: cfg, ArtifactsDir: home.ArtifactsDir(dir), Log: log, OnShutdown: stop})
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -98,5 +102,6 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		log.Error("serve failed", "err", err)
 		return 1
 	}
+	log.Info("stopped")
 	return 0
 }

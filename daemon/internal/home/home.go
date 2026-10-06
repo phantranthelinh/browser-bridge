@@ -114,6 +114,15 @@ func WriteRuntimeFiles(dir string, pid int, addr string) error {
 	return os.WriteFile(filepath.Join(dir, "daemon.addr"), []byte(addr), 0o644)
 }
 
+// RuntimeAddr is the address the running daemon wrote to daemon.addr, or "" when there is none.
+func RuntimeAddr(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "daemon.addr"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 func RemoveRuntimeFiles(dir string) {
 	os.Remove(filepath.Join(dir, "daemon.pid"))
 	os.Remove(filepath.Join(dir, "daemon.addr"))

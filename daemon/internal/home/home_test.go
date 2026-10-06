@@ -88,7 +88,13 @@ func TestRuntimeFiles(t *testing.T) {
 	if string(pid) != "1234" || string(addr) != "127.0.0.1:9876" {
 		t.Fatalf("pid=%q addr=%q", pid, addr)
 	}
+	if got := RuntimeAddr(dir); got != "127.0.0.1:9876" {
+		t.Fatalf("RuntimeAddr = %q", got)
+	}
 	RemoveRuntimeFiles(dir)
+	if got := RuntimeAddr(dir); got != "" {
+		t.Fatalf("RuntimeAddr after removal = %q", got)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
 		t.Fatal("daemon.pid not removed")
 	}
