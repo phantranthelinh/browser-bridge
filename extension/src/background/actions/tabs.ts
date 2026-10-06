@@ -147,11 +147,20 @@ const findTab: Handler<TabCtx> = async (ctx, args: FindTabArgs): Promise<FindTab
 
 const listTabs: Handler<TabCtx> = async (ctx): Promise<ListTabsResult> => {
   const s = await ctx.sessions.get(ctx.session);
+  const blocked = ctx.blockedHosts();
   const tabs: ListTabsResult['tabs'] = [];
   for (const id of [...s.tabIds, ...s.borrowedTabIds]) {
     const tab = await browser.tabs.get(id).catch(() => null);
     if (!tab) continue;
-    tabs.push({ tabId: id, url: tab.url ?? '', title: tab.title ?? '', current: id === s.currentTabId, borrowed: s.borrowedTabIds.includes(id) });
+    // A tab that ended up on a blocked host stays listed so the agent can close it, but blank.
+    const hidden = isBlocked(tab.url, blocked);
+    tabs.push({
+      tabId: id,
+      url: hidden ? '' : (tab.url ?? ''),
+      title: hidden ? '' : (tab.title ?? ''),
+      current: id === s.currentTabId,
+      borrowed: s.borrowedTabIds.includes(id),
+    });
   }
   return { tabs };
 };

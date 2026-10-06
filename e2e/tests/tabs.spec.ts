@@ -125,7 +125,10 @@ test('blocked hosts: refused up front, caught after a redirect, and the agent ca
   expect(JSON.stringify(viaRedirect)).not.toContain('Bridge test page');
 
   expect((await bridge.command(session, 'reload')).error?.code).toBe('BLOCKED_HOST');
-  expect((await ok(bridge.command(session, 'list_tabs'))).tabs).toHaveLength(1);
+  // still listed, so the agent can close it, but without the blocked page's URL or title
+  expect((await ok(bridge.command(session, 'list_tabs'))).tabs).toEqual([
+    { tabId: expect.any(Number), url: '', title: '', current: true, borrowed: false },
+  ]);
   expect(await ok(bridge.command(session, 'navigate', { url: site.url('/index.html') }))).toMatchObject({ title: 'Bridge test page' });
 });
 
