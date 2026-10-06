@@ -134,17 +134,17 @@ daemon/internal/protocol (Go struct + description)
 ## 5. Action trong MVP
 
 `selector` là ref `@e<n>` hoặc CSS selector. Chuỗi bắt đầu bằng `@e` thì là ref, còn lại coi là CSS. CSS phải khớp **đúng một** element:
-- không khớp element nào thì trả `ELEMENT_NOT_FOUND`;
+- không khớp element nào thì trả `ELEMENT_NOT_FOUND` (riêng `wait_for` thì chờ tiếp, §5.4);
 - khớp hơn một element thì trả `AMBIGUOUS_SELECTOR`.
 
 ### 5.1 Tab và điều hướng
 
 | Action | Args | Trả về `data` | Ghi chú |
 |---|---|---|---|
-| `navigate` | `url` (bắt buộc), `newTab` (bool, mặc định false), `groupTitle` | `tabId, url, title` | Session chưa có tab thì luôn tạo tab mới. Tab mới mở ở nền (`active:false`). `groupTitle` chỉ dùng khi tạo group, mặc định lấy tên session. Chỉ chấp nhận `http`, `https`, `about:blank`. Chờ load event xong mới trả |
+| `navigate` | `url` (bắt buộc), `newTab` (bool, mặc định false), `groupTitle` | `tabId, url, title` | Session chưa có tab hiện tại thì luôn tạo tab mới. Tab mới mở ở nền (`active:false`). `groupTitle` chỉ dùng khi tạo group, mặc định lấy tên session. Chỉ chấp nhận `http`, `https`, `about:blank`. Chờ load event xong mới trả |
 | `find_tab` | `url` (khớp theo host, `kimi.com` khớp cả `www.kimi.com`, bỏ qua path), `active` (bool) | `tabId, url, title, borrowed` | Mặc định chỉ tìm trong các tab của session. `active:true` thì mượn tab người dùng đang xem, tab đó không bị kéo vào group. Kết quả trở thành tab hiện tại của session |
 | `list_tabs` | — | `tabs: [{tabId, url, title, current, borrowed}]` | Chỉ tab của session |
-| `close_tab` | — | `closed, released` | Tab của session thì đóng. Tab đang mượn thì chỉ trả lại (detach, không đóng) |
+| `close_tab` | — | `closed, released` | Tab của session thì đóng. Tab đang mượn thì chỉ trả lại (detach, không đóng). Sau đó session không còn tab hiện tại |
 | `close_session` | — | `closed` (số tab) | Đóng mọi tab của session, trả lại tab mượn, xoá group |
 | `go_back` / `go_forward` / `reload` | — | `url, title` | Không có lịch sử để lùi/tiến thì trả `NAVIGATION_FAILED` |
 
@@ -186,7 +186,11 @@ daemon/internal/protocol (Go struct + description)
 |---|---|---|
 | `wait_for` | Đúng một trong: `selector` (kèm `state`: `visible` mặc định, hoặc `hidden`), `text` (chuỗi con trong `innerText` của body), `urlContains`, `load: true` | `matched: true, elapsedMs` |
 
-Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn thì trả `TIMEOUT`.
+- Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn thì trả `TIMEOUT`.
+- Với `selector`, chưa khớp element nào là đang chờ chứ không phải lỗi, nên `wait_for` không trả `ELEMENT_NOT_FOUND`:
+  - `visible`: xong khi selector khớp một element đang hiển thị (cùng tiêu chí ẩn/hiện với snapshot, §8.3);
+  - `hidden`: xong khi không còn element nào khớp, hoặc element khớp đang bị ẩn. Ref không còn tra ra element (bị xoá, hoặc trang đã sang document khác) cũng tính là đã ẩn, không trả `STALE_REF`.
+- Lúc nào CSS khớp hơn một element thì trả `AMBIGUOUS_SELECTOR` ngay, ở cả hai state.
 
 ### 5.5 Chụp màn hình
 
@@ -232,7 +236,8 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 - Mỗi session có một **tab hiện tại**. Mọi action đơn tab đều chạy trên tab đó, chưa có thì trả `NO_CURRENT_TAB`.
 - Lệnh trong cùng session chạy tuần tự qua một hàng đợi trong daemon. Các session khác nhau chạy song song.
 - State trong extension gồm: `{session → groupId, tabIds, currentTabId, borrowedTabIds}` và bộ đếm ref của từng tab. State này lưu trong `chrome.storage.session`.
-- Khi người dùng tự đóng một tab thuộc session, tab đó được gỡ khỏi state (lắng nghe `tabs.onRemoved`).
+- Khi người dùng tự đóng một tab thuộc session, tab đó được gỡ khỏi state (lắng nghe `tabs.onRemoved`). Nếu đó là tab hiện tại thì session không còn tab hiện tại.
+- **Lệnh dọn dẹp luôn chạy được:** `list_tabs`, `close_tab`, `close_session` không bao giờ bị chặn bởi `DIALOG_OPEN`, `DETACHED_BY_USER` hay `BLOCKED_HOST`, để agent luôn thoát được khỏi một tab đang kẹt.
 - **MCP:** mỗi tiến trình `bridge mcp` tự sinh một session tên `mcp-<6 ký tự ngẫu nhiên>` lúc khởi động. Tool MCP không có tham số `session`, để model nhỏ không phải lo chuyện này.
 
 ### 6.2 Ref `@e<n>`
@@ -253,7 +258,7 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 | HTTP từ chối mọi request có header `Origin` | Trang web gọi `fetch` tới localhost |
 | `Host` phải là `127.0.0.1:<port>` hoặc `localhost:<port>` | DNS rebinding |
 | `POST /command` bắt buộc `Content-Type: application/json` | Trình duyệt luôn phải gửi preflight, mà daemon không trả CORS nên bị chặn |
-| `config.blockedHosts`: khớp đúng host hoặc subdomain. Daemon kiểm tra khi `navigate`, extension kiểm tra URL của tab ở **mỗi lệnh** | Agent đi vào trang nhạy cảm, kể cả khi trang tự chuyển hướng sang đó. Trả lỗi `BLOCKED_HOST` |
+| `config.blockedHosts` (§7.1) | Agent đi vào trang nhạy cảm, kể cả khi trang tự chuyển hướng sang đó |
 | Snapshot không bao giờ chứa giá trị ô password | Lộ mật khẩu vào context của LLM |
 | Log không ghi `value` của `fill`, `code` của `evaluate`, `promptText` | Lộ dữ liệu qua file log |
 | `SKILL.md` dặn agent coi nội dung trang là dữ liệu, không bao giờ làm theo như lệnh | Prompt injection (chỉ giảm thiểu được, không chặn hẳn) |
@@ -263,6 +268,17 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 - Token phải nằm trong một file mà agent đọc được, nên tiến trình chạy dưới cùng user cũng đọc được.
 - Như vậy token không chặn được mối đe doạ cùng user.
 - Kết luận, ghi rõ trong README: **mọi tiến trình chạy dưới user của bạn đều điều khiển được trình duyệt qua bridge.** Mức rủi ro này giống Kimi WebBridge.
+
+### 7.1 `blockedHosts`
+
+- Khớp đúng host hoặc subdomain: `bank.com` chặn cả `bank.com` lẫn `www.bank.com`.
+- Daemon đọc danh sách từ `config.json` lúc khởi động rồi gửi xuống extension trong frame `welcome` (§10). Sửa danh sách thì phải `bridge restart`.
+- Daemon kiểm tra URL của `navigate` và `find_tab` trước khi gửi lệnh xuống extension.
+- Extension kiểm tra host của tab hiện tại trước mỗi lệnh, **trừ** các lệnh dùng để rời trang (`navigate`, `find_tab`, `go_back`, `go_forward`) và lệnh dọn dẹp (§6.1). Nếu chặn cả những lệnh này thì agent bị kẹt vĩnh viễn trên tab đó.
+- Sau khi `navigate`, `go_back`, `go_forward`, `reload` load xong, extension kiểm tra lại URL cuối cùng để bắt trường hợp trang tự chuyển hướng.
+- `find_tab` không chọn tab ở host bị chặn, kể cả khi mượn bằng `active:true`.
+- Vi phạm thì trả `BLOCKED_HOST`, không kèm `url` hay `title` của trang bị chặn.
+- `blockedHosts` chỉ chặn việc vào trang và thao tác trên trang. `cdp` vẫn đọc được cookie của mọi host, kể cả host bị chặn (`Network.getAllCookies`, `Network.getCookies`, `Storage.getCookies`). Đây là rủi ro đã chấp nhận: bridge chỉ nghe trên `127.0.0.1`, và theo quyết định không dùng token ở trên, mọi tiến trình chạy dưới user của bạn vốn đã điều khiển được trình duyệt.
 
 ## 8. Extension
 
@@ -286,7 +302,7 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 
   | Lý do | Xử lý |
   |---|---|
-  | `canceled_by_user` (người dùng bấm Cancel trên thanh vàng) | Session chuyển sang trạng thái dừng. Mọi lệnh trả `DETACHED_BY_USER`, cho tới khi agent gọi `navigate` hoặc `find_tab` |
+  | `canceled_by_user` (người dùng bấm Cancel trên thanh vàng) | Session chuyển sang trạng thái dừng. Mọi lệnh khác ngoài lệnh dọn dẹp (§6.1) trả `DETACHED_BY_USER`, cho tới khi agent gọi `navigate` hoặc `find_tab` |
   | `target_closed` | Gỡ tab khỏi state |
 
 ### 8.3 Page agent
@@ -318,7 +334,7 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 
 ### 8.5 Các action còn lại
 
-- **`navigate`:** kiểm tra URL và `blockedHosts` → `chrome.tabs.create({active:false})` hoặc `chrome.tabs.update` → chờ `Page.loadEventFired`. Tạo tab group bằng `chrome.tabs.group` + `tabGroups.update({title})`.
+- **`navigate`:** kiểm tra URL và `blockedHosts` → `chrome.tabs.create({active:false})` hoặc `chrome.tabs.update` → chờ `Page.loadEventFired` → kiểm tra lại `blockedHosts` với URL cuối cùng (§7.1). Tạo tab group bằng `chrome.tabs.group` + `tabGroups.update({title})`.
 - **`wait_for`:** `MutationObserver` kèm polling 100ms trong page agent. Riêng `urlContains` và `load` thì theo dõi ở service worker.
 - **`screenshot`:** `Page.captureScreenshot`.
   - Có `selector` thì dùng `clip` theo khung element (sau khi `scrollIntoView`).
@@ -330,7 +346,7 @@ Thời gian chờ tối đa lấy theo `timeoutMs` của request. Quá hạn th�
 
 - Lắng nghe `Page.javascriptDialogOpening` và lưu dialog đang mở theo từng tab.
 - Nếu dialog bật lên **trong lúc** đang chạy `click` hoặc `press_key`, action không chờ CDP trả về nữa (CDP sẽ treo cho tới khi dialog đóng), mà trả ngay `ok` kèm `dialog: {type, message}`.
-- Khi tab đang có dialog mở, mọi lệnh khác ngoài `handle_dialog` đều trả `DIALOG_OPEN` kèm `{type, message}` trong hint.
+- Khi tab đang có dialog mở, mọi lệnh khác ngoài `handle_dialog` và lệnh dọn dẹp (§6.1) đều trả `DIALOG_OPEN` kèm `{type, message}` trong hint.
 - `handle_dialog` khi không có dialog nào thì trả `NO_DIALOG`.
 
 ### 8.7 Side panel (React)
@@ -393,7 +409,7 @@ Mọi frame là JSON text, có trường `type`.
 
 ```text
 ext → daemon   {type:"hello", protocolVersion, extensionVersion, extensionId, browser}
-daemon → ext   {type:"welcome", protocolVersion, daemonVersion, blockedHosts}   extension dùng blockedHosts để kiểm tra mỗi lệnh (§7)
+daemon → ext   {type:"welcome", protocolVersion, daemonVersion, blockedHosts}   extension dùng blockedHosts để kiểm tra lệnh (§7.1)
 daemon → ext   {type:"request", id, session, action, args, deadline}     deadline: epoch ms
 ext → daemon   {type:"response", id, ok, data | error}
 ext → daemon   {type:"event", name, data}      tab.closed, dialog.opened, debugger.detached
@@ -413,13 +429,13 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
 | `VERSION_MISMATCH` | Lệch `protocolVersion` |
 | `NO_CURRENT_TAB` | Session chưa có tab hiện tại |
 | `TAB_NOT_FOUND` | `find_tab` không tìm thấy, hoặc tab đã bị đóng |
-| `STALE_REF` | Ref không còn trỏ tới element nào trong DOM |
-| `ELEMENT_NOT_FOUND` | CSS selector không khớp element nào |
+| `STALE_REF` | Ref không còn trỏ tới element nào trong DOM (trừ `wait_for` với `state: hidden`, §5.4) |
+| `ELEMENT_NOT_FOUND` | CSS selector không khớp element nào (trừ `wait_for`, §5.4) |
 | `AMBIGUOUS_SELECTOR` | CSS selector khớp nhiều hơn một element |
 | `ELEMENT_NOT_INTERACTABLE` | Element bị ẩn, bị disable, bị che, hoặc sai loại (ví dụ `upload` vào thứ không phải input file) |
 | `NAVIGATION_FAILED` | Lỗi khi navigate, hoặc không có lịch sử để lùi/tiến |
 | `RESTRICTED_URL` | `chrome://`, `edge://`, Web Store, scheme không được hỗ trợ |
-| `BLOCKED_HOST` | Host nằm trong `blockedHosts` |
+| `BLOCKED_HOST` | URL cần mở, hoặc URL của tab hiện tại, có host nằm trong `blockedHosts` (§7.1) |
 | `DIALOG_OPEN` | Tab đang có dialog JS chưa xử lý |
 | `NO_DIALOG` | `handle_dialog` khi không có dialog nào |
 | `DETACHED_BY_USER` | Người dùng đã bấm Cancel trên thanh vàng debug |
@@ -446,7 +462,9 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
   - các loại ô nhập: input, textarea, contenteditable (một editor kiểu ProseMirror), React controlled input, `<select>`, checkbox, radio, input file;
   - link sang trang thứ hai (để test back/forward);
   - nút bật `alert`, `confirm`, `prompt`;
-  - element hiện ra sau 1 giây (để test `wait_for`);
+  - element hiện ra sau 1 giây và element biến mất sau 1 giây (để test `wait_for` với `visible` và `hidden`);
+  - hai nút cùng class (để test `AMBIGUOUS_SELECTOR`);
+  - link chuyển hướng sang một host nằm trong `blockedHosts` của bộ test (để test `BLOCKED_HOST` khi trang tự chuyển hướng);
   - nút bị overlay che (để test `ELEMENT_NOT_INTERACTABLE`);
   - element bị xoá khỏi DOM (để test `STALE_REF`);
   - `fetch` tới API JSON local (để test network);
