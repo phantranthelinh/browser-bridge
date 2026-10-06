@@ -21,8 +21,12 @@ import (
 
 const usage = `usage: bridge <command>
 
-  serve [--addr host:port]   run the daemon in the foreground
-  version                    print the version
+  start [--addr host:port]     run the daemon in the background
+  stop                         stop the daemon
+  restart [--addr host:port]   stop, then start
+  status                       print the daemon status as JSON (exit 1 when not running)
+  serve [--addr host:port]     run the daemon in the foreground
+  version                      print the version
 `
 
 func main() {
@@ -32,9 +36,18 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	args := os.Args[2:]
 	switch os.Args[1] {
+	case "start":
+		os.Exit(startCmd(args, os.Stdout, os.Stderr))
+	case "stop":
+		os.Exit(stopCmd(args, os.Stdout, os.Stderr))
+	case "restart":
+		os.Exit(restartCmd(args, os.Stdout, os.Stderr))
+	case "status":
+		os.Exit(statusCmd(args, os.Stdout, os.Stderr))
 	case "serve":
-		os.Exit(serve(ctx, os.Args[2:], os.Stderr))
+		os.Exit(serve(ctx, args, os.Stderr))
 	case "version":
 		fmt.Println(protocol.Version)
 	default:
