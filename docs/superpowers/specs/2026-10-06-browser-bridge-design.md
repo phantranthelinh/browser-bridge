@@ -74,9 +74,10 @@ browser-bridge/
 ├── schema/                      JSON Schema sinh ra từ Go, có commit vào repo
 ├── extension/                   WXT + TypeScript
 │   └── src/
-│       ├── background/          service worker: connection, router, sessions, cdp, actions/
+│       ├── entrypoints/         điểm vào của WXT: background.ts, sidepanel/ (React)
+│       ├── background/          logic của service worker: connection, router, sessions, cdp, actions/
 │       ├── page-agent/          bundle IIFE inject vào trang
-│       ├── sidepanel/           React
+│       ├── shared/              type và key storage dùng chung giữa service worker và side panel
 │       └── generated/           type TS sinh từ schema/
 ├── skill/browser-bridge/SKILL.md
 ├── testpage/                    trang HTML tĩnh + API giả để test
@@ -458,6 +459,7 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
 - **E2E (Playwright, TypeScript):**
   - Chạy trên Chromium hoặc Chrome for Testing. Chrome bản thường từ 137 đã bỏ cờ `--load-extension`.
   - Load extension bằng `launchPersistentContext` với `--load-extension`, bật `bridge serve` trên một port ngẫu nhiên, gọi lệnh qua HTTP.
+  - Daemon của E2E chạy ở cổng 19876, và extension được build bằng `--mode e2e` với địa chỉ đó compile sẵn (`WXT_DAEMON_URL`), nên một lần chạy test không bao giờ nối vào daemon thật ở 9876.
   - Mỗi action có ít nhất một test chạy đúng và một test lỗi.
 - **`testpage/`:**
   - các loại ô nhập: input, textarea, contenteditable (một editor kiểu ProseMirror), React controlled input, `<select>`, checkbox, radio, input file;
