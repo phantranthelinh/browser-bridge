@@ -1,2 +1,7 @@
 /daemon/bridge.exe
 node_modules/
+/extension/.output/
+/extension/.wxt/
+/e2e/.cache/
+/e2e/test-results/
+/e2e/playwright-report/
