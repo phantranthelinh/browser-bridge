@@ -1,0 +1,14 @@
+{
+  "name": "browser-bridge-e2e",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  },
+  "private": true
+}
