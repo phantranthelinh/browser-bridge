@@ -1,0 +1,94 @@
+# Builds, tests and publishes a release when a version tag (v0.1.0, ...) is pushed.
+# Design: docs/superpowers/specs/2026-10-06-installer-design.md §5
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            extension/package-lock.json
+            e2e/package-lock.json
+
+      - name: Check the tag against the daemon and extension versions
+        shell: pwsh
+        run: ./install/check-version.ps1 -Tag "$env:GITHUB_REF_NAME"
+
+      # bash stops at the first failing command; a pwsh step would only report the last one.
+      - name: Test the daemon
+        shell: bash
+        run: |
+          go -C daemon vet ./...
+          go -C daemon test ./...
+
+      - name: Test the extension
+        shell: bash
+        run: |
+          npm ci --prefix extension
+          npm --prefix extension run check:gen
+          npm --prefix extension run typecheck
+          npm --prefix extension test
+
+      - name: Run the end-to-end tests
+        shell: bash
+        run: |
+          npm ci --prefix e2e
+          cd e2e
+          npx playwright install chromium
+          npm test
+
+      - name: Build the release files
+        shell: pwsh
+        run: ./install/build-dist.ps1 -Out dist
+
+      - name: Test the installer with Windows PowerShell 5.1
+        shell: powershell
+        run: ./install/test-install.ps1 -Artifacts dist -Shell powershell
+
+      - name: Test the installer with PowerShell 7
+        shell: pwsh
+        run: ./install/test-install.ps1 -Artifacts dist -Shell pwsh
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          dist/install.ps1 dist/bridge-windows-amd64.exe dist/browser-bridge-extension.zip
+          --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Install from the published release
+        shell: powershell
+        run: |
+          $env:BRIDGE_HOME = Join-Path $env:RUNNER_TEMP 'bridge-smoke'
+          $env:BRIDGE_VERSION = $env:GITHUB_REF_NAME.TrimStart('v')
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1"
+          # The new release's files can take a few seconds to become downloadable.
+          $installer = $null
+          for ($i = 1; -not $installer; $i++) {
+            try { $installer = irm $url } catch { if ($i -ge 6) { throw }; Start-Sleep -Seconds 5 }
+          }
+          iex "& { $installer } -NoPath -NoWait"
+          $installed = & "$env:BRIDGE_HOME\bin\bridge.exe" version
+          if ($installed -ne $env:BRIDGE_VERSION) { throw "installed $installed, expected $env:BRIDGE_VERSION" }
+          iex "& { $installer } -Uninstall"
