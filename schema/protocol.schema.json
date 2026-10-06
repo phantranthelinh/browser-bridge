@@ -1,0 +1,1263 @@
+{
+  "$defs": {
+    "ActionName": {
+      "type": "string",
+      "enum": [
+        "navigate",
+        "find_tab",
+        "list_tabs",
+        "close_tab",
+        "close_session",
+        "go_back",
+        "go_forward",
+        "reload",
+        "snapshot",
+        "click",
+        "fill",
+        "select",
+        "press_key",
+        "scroll",
+        "upload",
+        "wait_for",
+        "screenshot",
+        "network_start",
+        "network_requests",
+        "network_request_detail",
+        "network_stop",
+        "handle_dialog",
+        "evaluate",
+        "cdp"
+      ],
+      "title": "ActionName"
+    },
+    "CDPArgs": {
+      "properties": {
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CDP method such as DOM.getDocument. Browser.* and Target.* are blocked"
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "method"
+      ],
+      "title": "CDPArgs"
+    },
+    "ClickResult": {
+      "properties": {
+        "tag": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "dialog": {
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "alert",
+                "confirm",
+                "prompt",
+                "beforeunload"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "message"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tag",
+        "text"
+      ],
+      "title": "ClickResult"
+    },
+    "CloseSessionResult": {
+      "properties": {
+        "closed": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "closed"
+      ],
+      "title": "CloseSessionResult"
+    },
+    "CloseTabResult": {
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        },
+        "released": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "closed",
+        "released"
+      ],
+      "title": "CloseTabResult"
+    },
+    "Dialog": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "alert",
+            "confirm",
+            "prompt",
+            "beforeunload"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "message"
+      ],
+      "title": "Dialog"
+    },
+    "EmptyResult": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "title": "EmptyResult"
+    },
+    "Error": {
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "INVALID_REQUEST",
+            "UNKNOWN_ACTION",
+            "FORBIDDEN",
+            "EXTENSION_NOT_CONNECTED",
+            "VERSION_MISMATCH",
+            "NO_CURRENT_TAB",
+            "TAB_NOT_FOUND",
+            "STALE_REF",
+            "ELEMENT_NOT_FOUND",
+            "AMBIGUOUS_SELECTOR",
+            "ELEMENT_NOT_INTERACTABLE",
+            "NAVIGATION_FAILED",
+            "RESTRICTED_URL",
+            "BLOCKED_HOST",
+            "DIALOG_OPEN",
+            "NO_DIALOG",
+            "DETACHED_BY_USER",
+            "TIMEOUT",
+            "EVAL_ERROR",
+            "CDP_ERROR",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "Error"
+    },
+    "EvaluateArgs": {
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "JavaScript run in the page's main world. Top-level await is allowed"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "title": "EvaluateArgs"
+    },
+    "EvaluateResult": {
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "EvaluateResult"
+    },
+    "EventFrame": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "event"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "enum": [
+            "tab.closed",
+            "dialog.opened",
+            "debugger.detached"
+          ]
+        },
+        "data": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "name"
+      ],
+      "title": "EventFrame"
+    },
+    "FillArgs": {
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Element ref from snapshot (@e12) or a CSS selector that matches exactly one element"
+        },
+        "value": {
+          "type": "string",
+          "description": "Text to put in the field. Empty string clears it"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "selector",
+        "value"
+      ],
+      "title": "FillArgs"
+    },
+    "FillResult": {
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "value",
+            "contenteditable"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "title": "FillResult"
+    },
+    "FindTabArgs": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Host to match: kimi.com also matches www.kimi.com. Path is ignored"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Borrow the tab the user is looking at instead of searching the session's tabs"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "FindTabArgs"
+    },
+    "FindTabResult": {
+      "properties": {
+        "tabId": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "borrowed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tabId",
+        "url",
+        "title",
+        "borrowed"
+      ],
+      "title": "FindTabResult"
+    },
+    "HandleDialogArgs": {
+      "properties": {
+        "accept": {
+          "type": "boolean"
+        },
+        "promptText": {
+          "type": "string",
+          "description": "Text to type into a prompt() dialog"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "accept"
+      ],
+      "title": "HandleDialogArgs"
+    },
+    "Hello": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "hello"
+          ]
+        },
+        "protocolVersion": {
+          "type": "integer"
+        },
+        "extensionVersion": {
+          "type": "string"
+        },
+        "extensionId": {
+          "type": "string"
+        },
+        "browser": {
+          "type": "string",
+          "enum": [
+            "chrome",
+            "edge"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "protocolVersion",
+        "extensionVersion",
+        "extensionId",
+        "browser"
+      ],
+      "title": "Hello"
+    },
+    "ListTabsResult": {
+      "properties": {
+        "tabs": {
+          "items": {
+            "properties": {
+              "tabId": {
+                "type": "integer"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "current": {
+                "type": "boolean"
+              },
+              "borrowed": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "tabId",
+              "url",
+              "title",
+              "current",
+              "borrowed"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tabs"
+      ],
+      "title": "ListTabsResult"
+    },
+    "NavigateArgs": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "http(s) URL or about:blank"
+        },
+        "newTab": {
+          "type": "boolean",
+          "description": "Open a new background tab instead of reusing the current tab"
+        },
+        "groupTitle": {
+          "type": "string",
+          "description": "Tab group title, used only when the group is created. Defaults to the session name"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "title": "NavigateArgs"
+    },
+    "NetworkFilterArgs": {
+      "properties": {
+        "filter": {
+          "type": "string",
+          "description": "Only requests whose URL contains this"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "NetworkFilterArgs"
+    },
+    "NetworkRequestDetailArgs": {
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "requestId"
+      ],
+      "title": "NetworkRequestDetailArgs"
+    },
+    "NetworkRequestDetailResult": {
+      "properties": {
+        "request": {
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "postData": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "url",
+            "method",
+            "headers"
+          ]
+        },
+        "response": {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "mimeType": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "status",
+            "headers",
+            "mimeType"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "bodyBase64Encoded": {
+          "type": "boolean"
+        },
+        "bodyError": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "request",
+        "body",
+        "bodyBase64Encoded"
+      ],
+      "title": "NetworkRequestDetailResult"
+    },
+    "NetworkRequestsResult": {
+      "properties": {
+        "capturing": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "requests": {
+          "items": {
+            "properties": {
+              "requestId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer"
+              },
+              "mimeType": {
+                "type": "string"
+              },
+              "completed": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "requestId",
+              "url",
+              "method",
+              "status",
+              "mimeType",
+              "completed"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "capturing",
+        "count",
+        "requests"
+      ],
+      "title": "NetworkRequestsResult"
+    },
+    "NoArgs": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "title": "NoArgs"
+    },
+    "PageResult": {
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "title"
+      ],
+      "title": "PageResult"
+    },
+    "PingFrame": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ping"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "title": "PingFrame"
+    },
+    "PongFrame": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "pong"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "title": "PongFrame"
+    },
+    "PressKeyArgs": {
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Enter, Escape, Tab, ArrowDown, Control+A ..."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Focus this element first"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "title": "PressKeyArgs"
+    },
+    "PressKeyResult": {
+      "properties": {
+        "dialog": {
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "alert",
+                "confirm",
+                "prompt",
+                "beforeunload"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "message"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "PressKeyResult"
+    },
+    "RequestFrame": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "request"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "args": true,
+        "deadline": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "session",
+        "action",
+        "args",
+        "deadline"
+      ],
+      "title": "RequestFrame"
+    },
+    "ResponseFrame": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "response"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "data": true,
+        "error": {
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_REQUEST",
+                "UNKNOWN_ACTION",
+                "FORBIDDEN",
+                "EXTENSION_NOT_CONNECTED",
+                "VERSION_MISMATCH",
+                "NO_CURRENT_TAB",
+                "TAB_NOT_FOUND",
+                "STALE_REF",
+                "ELEMENT_NOT_FOUND",
+                "AMBIGUOUS_SELECTOR",
+                "ELEMENT_NOT_INTERACTABLE",
+                "NAVIGATION_FAILED",
+                "RESTRICTED_URL",
+                "BLOCKED_HOST",
+                "DIALOG_OPEN",
+                "NO_DIALOG",
+                "DETACHED_BY_USER",
+                "TIMEOUT",
+                "EVAL_ERROR",
+                "CDP_ERROR",
+                "INTERNAL"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "hint": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "ok"
+      ],
+      "title": "ResponseFrame"
+    },
+    "ScreenshotArgs": {
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "default": "png"
+        },
+        "quality": {
+          "type": "integer",
+          "maximum": 100,
+          "minimum": 0,
+          "description": "JPEG quality, ignored for png",
+          "default": 80
+        },
+        "selector": {
+          "type": "string",
+          "description": "Capture only this element"
+        },
+        "fullPage": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute file path to write. Parent folders are created and an existing file is overwritten. Default: ~/.browser-bridge/artifacts/"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "ScreenshotArgs"
+    },
+    "ScreenshotCapture": {
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "Base64-encoded image bytes"
+        },
+        "mimeType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg"
+          ]
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "data",
+        "mimeType",
+        "width",
+        "height"
+      ],
+      "title": "ScreenshotCapture"
+    },
+    "ScreenshotResult": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "sizeBytes",
+        "mimeType",
+        "width",
+        "height"
+      ],
+      "title": "ScreenshotResult"
+    },
+    "ScrollArgs": {
+      "oneOf": [
+        {
+          "required": [
+            "selector"
+          ],
+          "title": "toElement"
+        },
+        {
+          "required": [
+            "direction"
+          ],
+          "title": "byAmount"
+        }
+      ],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "description": "Scroll this element into view. Give either selector or direction"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Pixels, only together with direction",
+          "default": 600
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "dependentRequired": {
+        "amount": [
+          "direction"
+        ]
+      },
+      "title": "ScrollArgs"
+    },
+    "ScrollResult": {
+      "properties": {
+        "scrollX": {
+          "type": "number"
+        },
+        "scrollY": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "scrollX",
+        "scrollY"
+      ],
+      "title": "ScrollResult"
+    },
+    "SelectArgs": {
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ],
+          "title": "byValue"
+        },
+        {
+          "required": [
+            "label"
+          ],
+          "title": "byLabel"
+        }
+      ],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Element ref from snapshot (@e12) or a CSS selector that matches exactly one element"
+        },
+        "value": {
+          "type": "string",
+          "description": "Option value. Give exactly one of value or label"
+        },
+        "label": {
+          "type": "string",
+          "description": "Visible option text. Give exactly one of value or label"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "selector"
+      ],
+      "title": "SelectArgs"
+    },
+    "SelectResult": {
+      "properties": {
+        "selected": {
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "value",
+            "label"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "selected"
+      ],
+      "title": "SelectResult"
+    },
+    "SelectorArgs": {
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Element ref from snapshot (@e12) or a CSS selector that matches exactly one element"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "selector"
+      ],
+      "title": "SelectorArgs"
+    },
+    "SnapshotArgs": {
+      "properties": {
+        "maxChars": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20000
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "title": "SnapshotArgs"
+    },
+    "SnapshotResult": {
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tree": {
+          "type": "string"
+        },
+        "frames": {
+          "items": {
+            "properties": {
+              "frame": {
+                "type": "integer",
+                "description": "0-based index of the iframe in document order"
+              },
+              "url": {
+                "type": "string"
+              },
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "frame",
+              "url",
+              "width",
+              "height"
+            ]
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "title",
+        "tree",
+        "frames",
+        "truncated"
+      ],
+      "title": "SnapshotResult"
+    },
+    "TabResult": {
+      "properties": {
+        "tabId": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tabId",
+        "url",
+        "title"
+      ],
+      "title": "TabResult"
+    },
+    "UploadArgs": {
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "An input[type=file], as a ref or a CSS selector"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Absolute paths of existing files"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "selector",
+        "files"
+      ],
+      "title": "UploadArgs"
+    },
+    "UploadResult": {
+      "properties": {
+        "fileCount": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "fileCount"
+      ],
+      "title": "UploadResult"
+    },
+    "WaitForArgs": {
+      "oneOf": [
+        {
+          "required": [
+            "selector"
+          ],
+          "title": "selector"
+        },
+        {
+          "required": [
+            "text"
+          ],
+          "title": "text"
+        },
+        {
+          "required": [
+            "urlContains"
+          ],
+          "title": "urlContains"
+        },
+        {
+          "required": [
+            "load"
+          ],
+          "title": "load"
+        }
+      ],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "description": "Wait for this element to reach state"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "visible",
+            "hidden"
+          ],
+          "default": "visible"
+        },
+        "text": {
+          "type": "string",
+          "description": "Wait until the page text contains this"
+        },
+        "urlContains": {
+          "type": "string"
+        },
+        "load": {
+          "type": "boolean",
+          "const": true,
+          "description": "Wait for the load event. Must be true"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "dependentRequired": {
+        "state": [
+          "selector"
+        ]
+      },
+      "title": "WaitForArgs"
+    },
+    "WaitForResult": {
+      "properties": {
+        "matched": {
+          "type": "boolean"
+        },
+        "elapsedMs": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "matched",
+        "elapsedMs"
+      ],
+      "title": "WaitForResult"
+    },
+    "Welcome": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "welcome"
+          ]
+        },
+        "protocolVersion": {
+          "type": "integer"
+        },
+        "daemonVersion": {
+          "type": "string"
+        },
+        "blockedHosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "protocolVersion",
+        "daemonVersion",
+        "blockedHosts"
+      ],
+      "title": "Welcome"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BrowserBridgeProtocol"
+}
