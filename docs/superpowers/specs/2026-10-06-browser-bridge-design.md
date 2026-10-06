@@ -127,7 +127,7 @@ daemon/internal/protocol (Go struct + description)
   |---|---|
   | 200 | Mọi kết quả đã xử lý được, kể cả `ok:false` |
   | 400 | JSON hỏng, sai schema, action không tồn tại |
-  | 403 | Không qua được kiểm tra security (§7) |
+  | 403 | Không qua được kiểm tra security (§7), mã lỗi `FORBIDDEN` |
 
   Mọi trường hợp đều trả đúng envelope trên.
 
@@ -142,7 +142,7 @@ daemon/internal/protocol (Go struct + description)
 | Action | Args | Trả về `data` | Ghi chú |
 |---|---|---|---|
 | `navigate` | `url` (bắt buộc), `newTab` (bool, mặc định false), `groupTitle` | `tabId, url, title` | Session chưa có tab hiện tại thì luôn tạo tab mới. Tab mới mở ở nền (`active:false`). `groupTitle` chỉ dùng khi tạo group, mặc định lấy tên session. Chỉ chấp nhận `http`, `https`, `about:blank`. Chờ load event xong mới trả |
-| `find_tab` | `url` (khớp theo host, `kimi.com` khớp cả `www.kimi.com`, bỏ qua path), `active` (bool) | `tabId, url, title, borrowed` | Mặc định chỉ tìm trong các tab của session. `active:true` thì mượn tab người dùng đang xem, tab đó không bị kéo vào group. Kết quả trở thành tab hiện tại của session |
+| `find_tab` | `url` (khớp theo host, `kimi.com` khớp cả `www.kimi.com`, bỏ qua path), `active` (bool) | `tabId, url, title, borrowed` | Phải có `url`, `active:true`, hoặc cả hai. Mặc định chỉ tìm trong các tab của session. `active:true` thì mượn tab người dùng đang xem, tab đó không bị kéo vào group. Kết quả trở thành tab hiện tại của session |
 | `list_tabs` | — | `tabs: [{tabId, url, title, current, borrowed}]` | Chỉ tab của session |
 | `close_tab` | — | `closed, released` | Tab của session thì đóng. Tab đang mượn thì chỉ trả lại (detach, không đóng). Sau đó session không còn tab hiện tại |
 | `close_session` | — | `closed` (số tab) | Đóng mọi tab của session, trả lại tab mượn, xoá group |
@@ -199,7 +199,7 @@ daemon/internal/protocol (Go struct + description)
 | `screenshot` | `format` (`png` mặc định, hoặc `jpeg`), `quality` (0–100, chỉ áp dụng cho jpeg, mặc định 80), `selector?`, `fullPage` (bool), `path?` | `path, sizeBytes, mimeType, width, height` |
 
 - Không truyền `path` thì file được ghi vào `~/.browser-bridge/artifacts/<session>-<timestamp>.<ext>`.
-- `path` do caller truyền được dùng nguyên văn: tự tạo thư mục cha, ghi đè nếu file đã tồn tại.
+- `path` do caller truyền phải là đường dẫn tuyệt đối, vì thư mục làm việc của daemon không phải của agent. Đường dẫn được dùng nguyên văn: tự tạo thư mục cha, ghi đè nếu file đã tồn tại.
 
 ### 5.6 Network
 
@@ -423,8 +423,9 @@ ext → daemon   {type:"ping"}   mỗi 20 giây;     daemon → ext  {type:"pong
 
 | Code | Khi nào |
 |---|---|
-| `INVALID_REQUEST` | Sai schema, sai regex session, file upload không tồn tại |
+| `INVALID_REQUEST` | Sai schema, sai regex session, file upload không tồn tại, đường dẫn không tuyệt đối |
 | `UNKNOWN_ACTION` | Action không có trong danh sách |
+| `FORBIDDEN` | Không qua được kiểm tra security (§7): sai `Origin`, `Host` hoặc `Content-Type` |
 | `EXTENSION_NOT_CONNECTED` | Chưa có extension kết nối, hoặc kết nối mất giữa chừng |
 | `VERSION_MISMATCH` | Lệch `protocolVersion` |
 | `NO_CURRENT_TAB` | Session chưa có tab hiện tại |
