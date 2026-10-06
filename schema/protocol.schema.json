@@ -348,7 +348,8 @@
           ]
         },
         "protocolVersion": {
-          "type": "integer"
+          "type": "integer",
+          "const": 1
         },
         "extensionVersion": {
           "type": "string"
@@ -1235,7 +1236,8 @@
           ]
         },
         "protocolVersion": {
-          "type": "integer"
+          "type": "integer",
+          "const": 1
         },
         "daemonVersion": {
           "type": "string"

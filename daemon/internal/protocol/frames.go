@@ -1,6 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/invopop/jsonschema"
+)
 
 // WebSocket frames between daemon and extension. Every frame is a JSON text message whose "type"
 // field names the frame.
@@ -11,6 +15,18 @@ type Hello struct {
 	ExtensionVersion string `json:"extensionVersion"`
 	ExtensionID      string `json:"extensionId"`
 	Browser          string `json:"browser" jsonschema:"enum=chrome,enum=edge"`
+}
+
+// JSONSchemaExtend pins protocolVersion to the Go constant. The extension's generated type then
+// becomes the literal version, so bumping it here breaks the extension's build until it follows.
+func (Hello) JSONSchemaExtend(s *jsonschema.Schema) { pinProtocolVersion(s) }
+
+func (Welcome) JSONSchemaExtend(s *jsonschema.Schema) { pinProtocolVersion(s) }
+
+func pinProtocolVersion(s *jsonschema.Schema) {
+	if p, ok := s.Properties.Get("protocolVersion"); ok {
+		p.Const = ProtocolVersion
+	}
 }
 
 type Welcome struct {

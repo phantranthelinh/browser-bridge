@@ -121,3 +121,18 @@ func TestDocumentHasEveryActionType(t *testing.T) {
 		t.Error("Welcome must carry blockedHosts")
 	}
 }
+
+func TestFramesPinProtocolVersion(t *testing.T) {
+	b, _ := Document()
+	var doc struct {
+		Defs map[string]struct {
+			Properties map[string]map[string]any `json:"properties"`
+		} `json:"$defs"`
+	}
+	json.Unmarshal(b, &doc)
+	for _, name := range []string{"Hello", "Welcome"} {
+		if got := doc.Defs[name].Properties["protocolVersion"]["const"]; got != float64(ProtocolVersion) {
+			t.Errorf("%s.protocolVersion const = %v, want %d", name, got, ProtocolVersion)
+		}
+	}
+}
