@@ -579,6 +579,9 @@ export interface WaitForArgs2 {
    * Wait for this element to reach state
    */
   selector?: string;
+  /**
+   * Only together with selector
+   */
   state?: 'visible' | 'hidden';
   /**
    * Wait until the page text contains this

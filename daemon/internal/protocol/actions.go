@@ -166,7 +166,7 @@ type UploadResult struct {
 
 type WaitForArgs struct {
 	Selector    string `json:"selector,omitempty" jsonschema:"oneof_required=selector" jsonschema_description:"Wait for this element to reach state"`
-	State       string `json:"state,omitempty" jsonschema:"enum=visible,enum=hidden,default=visible"`
+	State       string `json:"state,omitempty" jsonschema:"enum=visible,enum=hidden,default=visible" jsonschema_description:"Only together with selector"`
 	Text        string `json:"text,omitempty" jsonschema:"oneof_required=text" jsonschema_description:"Wait until the page text contains this"`
 	URLContains string `json:"urlContains,omitempty" jsonschema:"oneof_required=urlContains"`
 	Load        bool   `json:"load,omitempty" jsonschema:"oneof_required=load" jsonschema_description:"Wait for the load event. Must be true"`
@@ -288,7 +288,7 @@ var Actions = []Action{
 	{"press_key", "Press a key or key combination, optionally after focusing an element.", PressKeyArgs{}, PressKeyResult{}, actionTimeoutMs},
 	{"scroll", "Scroll an element into view, or scroll the page in a direction.", ScrollArgs{}, ScrollResult{}, actionTimeoutMs},
 	{"upload", "Set the files of an input[type=file].", UploadArgs{}, UploadResult{}, actionTimeoutMs},
-	{"wait_for", "Wait until an element is visible or hidden, the page contains a text, the URL contains a string, or the page has loaded.", WaitForArgs{}, WaitForResult{}, actionTimeoutMs},
+	{"wait_for", "Wait until an element is visible or hidden, the page contains a text, the URL contains a string, or the page has loaded. Give exactly one of selector, text, urlContains or load.", WaitForArgs{}, WaitForResult{}, actionTimeoutMs},
 	{"screenshot", "Capture the visible tab, the full page or one element to an image file.", ScreenshotArgs{}, ScreenshotResult{}, actionTimeoutMs},
 	{"network_start", "Start recording the current tab's network requests, discarding earlier ones.", NetworkFilterArgs{}, EmptyResult{}, actionTimeoutMs},
 	{"network_requests", "List recorded network requests.", NetworkFilterArgs{}, NetworkRequestsResult{}, actionTimeoutMs},

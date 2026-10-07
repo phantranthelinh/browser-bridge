@@ -21,10 +21,15 @@ import (
 
 const usage = `usage: bridge <command>
 
+  call <action> --session <name> [key=value ...]
+                               run one action and print the result (bridge call -h for more)
   start [--addr host:port]     run the daemon in the background
   stop                         stop the daemon
   restart [--addr host:port]   stop, then start
   status                       print the daemon status as JSON (exit 1 when not running)
+  logs [-f] [-n N] [--prev]    print the end of the daemon log
+  mcp                          serve the actions as MCP tools over stdio
+  install-skill [--remove]     add the browser-bridge skill to Claude Code and Codex
   serve [--addr host:port]     run the daemon in the foreground
   version                      print the version
   help                         print this help
@@ -32,19 +37,27 @@ const usage = `usage: bridge <command>
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
 }
 
 // run dispatches one subcommand and returns the process exit code.
-func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(argv) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
 	args := argv[1:]
 	switch argv[0] {
+	case "call":
+		return callCmd(ctx, args, stdin, stdout, stderr)
+	case "mcp":
+		return mcpCmd(ctx, args, stdin, stdout, stderr)
+	case "logs":
+		return logsCmd(ctx, args, stdout, stderr)
+	case "install-skill":
+		return installSkillCmd(args, stdout, stderr)
 	case "start":
 		return startCmd(args, stdout, stderr)
 	case "stop":

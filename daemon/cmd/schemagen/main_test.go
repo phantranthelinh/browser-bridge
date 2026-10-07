@@ -25,3 +25,19 @@ func TestCommittedSchemaIsUpToDate(t *testing.T) {
 		t.Fatal("schema/protocol.schema.json is stale (run: go -C daemon run ./cmd/schemagen)")
 	}
 }
+
+// The skill's action table is what agents read to call actions, so it must follow the schema.
+func TestCommittedSkillTableIsUpToDate(t *testing.T) {
+	got, err := os.ReadFile("../../skill/browser-bridge/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n"))
+	want, err := protocol.WithToolTable(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("the action table in daemon/skill/browser-bridge/SKILL.md is stale (run: go -C daemon run ./cmd/schemagen)")
+	}
+}

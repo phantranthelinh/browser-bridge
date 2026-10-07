@@ -107,7 +107,7 @@ func startCmd(args []string, stdout, stderr io.Writer) int {
 }
 
 func startFailed(dir string, stderr io.Writer, reason string) int {
-	logPath := filepath.Join(dir, "logs", "daemon.log")
+	logPath := home.LogPath(dir)
 	fmt.Fprintf(stderr, "bridge: %s. Last lines of %s:\n", reason, logPath)
 	for _, line := range tail(logPath, 10) {
 		fmt.Fprintln(stderr, "  "+line)

@@ -128,13 +128,15 @@ func RemoveRuntimeFiles(dir string) {
 	os.Remove(filepath.Join(dir, "daemon.addr"))
 }
 
+// LogPath is the current run's log. The previous run's is LogPath + ".prev".
+func LogPath(dir string) string { return filepath.Join(dir, "logs", "daemon.log") }
+
 // OpenLog moves the previous run's log to daemon.log.prev and starts a fresh daemon.log.
 func OpenLog(dir string) (*os.File, error) {
-	logs := filepath.Join(dir, "logs")
-	if err := os.MkdirAll(logs, 0o755); err != nil {
+	cur := LogPath(dir)
+	if err := os.MkdirAll(filepath.Dir(cur), 0o755); err != nil {
 		return nil, err
 	}
-	cur := filepath.Join(logs, "daemon.log")
 	if _, err := os.Stat(cur); err == nil {
 		if err := os.Rename(cur, cur+".prev"); err != nil {
 			return nil, err
