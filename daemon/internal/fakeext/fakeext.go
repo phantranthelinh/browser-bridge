@@ -20,7 +20,9 @@ type Handler func(f protocol.RequestFrame) (resp protocol.Response, reply bool)
 type Options struct {
 	ID              string // defaults to protocol.DefaultExtensionID
 	ProtocolVersion int    // defaults to protocol.ProtocolVersion
-	Handler         Handler
+	// Actions is what the fake reports it implements; nil means every action.
+	Actions []string
+	Handler Handler
 }
 
 type Ext struct {
@@ -56,6 +58,11 @@ func Dial(ctx context.Context, wsURL string, opt Options) (*Ext, error) {
 	if opt.Handler == nil {
 		opt.Handler = Echo
 	}
+	if opt.Actions == nil {
+		for _, a := range protocol.Actions {
+			opt.Actions = append(opt.Actions, a.Name)
+		}
+	}
 	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{"Origin": {"chrome-extension://" + opt.ID}},
 	})
@@ -63,7 +70,7 @@ func Dial(ctx context.Context, wsURL string, opt Options) (*Ext, error) {
 		return nil, err
 	}
 	c.SetReadLimit(64 << 20)
-	hello := protocol.Hello{Type: "hello", ProtocolVersion: opt.ProtocolVersion, ExtensionVersion: protocol.Version, ExtensionID: opt.ID, Browser: "chrome"}
+	hello := protocol.Hello{Type: "hello", ProtocolVersion: opt.ProtocolVersion, ExtensionVersion: protocol.Version, ExtensionID: opt.ID, Browser: "chrome", Actions: opt.Actions}
 	if err := write(ctx, c, hello); err != nil {
 		return nil, err
 	}

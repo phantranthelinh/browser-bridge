@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -99,7 +103,7 @@ func isExtensionStore(host, path string) bool {
 		(host == "microsoftedge.microsoft.com" && strings.HasPrefix(path, "/addons"))
 }
 
-// hostOf reads the host from what an agent passes to find_tab: "kimi.com", "www.kimi.com/x" or
+// hostOf reads the host from what an agent passes to find_tab: "example.com", "www.example.com/x" or
 // a full URL.
 func hostOf(s string) string {
 	if !strings.Contains(s, "://") {
@@ -143,6 +147,10 @@ func (s *Server) saveScreenshot(session string, args json.RawMessage, resp proto
 	if err != nil {
 		return protocol.Fail(protocol.ErrInternal, "extension sent invalid base64: "+err.Error(), "")
 	}
+	size, _, err := image.DecodeConfig(bytes.NewReader(img))
+	if err != nil {
+		return protocol.Fail(protocol.ErrInternal, "extension sent an unreadable image: "+err.Error(), "")
+	}
 	path := a.Path
 	if path == "" {
 		ext := "png"
@@ -157,6 +165,6 @@ func (s *Server) saveScreenshot(session string, args json.RawMessage, resp proto
 	if err := os.WriteFile(path, img, 0o644); err != nil {
 		return protocol.Fail(protocol.ErrInternal, "cannot write "+path+": "+err.Error(), "")
 	}
-	data, _ := json.Marshal(protocol.ScreenshotResult{Path: path, SizeBytes: int64(len(img)), MimeType: c.MimeType, Width: c.Width, Height: c.Height})
+	data, _ := json.Marshal(protocol.ScreenshotResult{Path: path, SizeBytes: int64(len(img)), MimeType: c.MimeType, Width: size.Width, Height: size.Height})
 	return protocol.Response{OK: true, Data: data}
 }

@@ -15,6 +15,9 @@ type Hello struct {
 	ExtensionVersion string `json:"extensionVersion"`
 	ExtensionID      string `json:"extensionId"`
 	Browser          string `json:"browser" jsonschema:"enum=chrome,enum=edge"`
+	// Actions lets GET /tools tell an agent which actions this extension can run, so it does not
+	// have to find out by calling them.
+	Actions []string `json:"actions"`
 }
 
 // JSONSchemaExtend pins protocolVersion to the Go constant. The extension's generated type then

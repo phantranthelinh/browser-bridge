@@ -10,7 +10,7 @@ import type { Hello } from '../generated/protocol';
 import { DEFAULT_DAEMON_URL, KEYS } from '../shared/state';
 
 // Typed as the schema's literal: when the daemon bumps ProtocolVersion, this line stops compiling.
-const PROTOCOL_VERSION: Hello['protocolVersion'] = 1;
+const PROTOCOL_VERSION: Hello['protocolVersion'] = 2;
 
 export default defineBackground(() => {
   const sessions = new SessionStore(browser.storage.session);
@@ -34,6 +34,7 @@ export default defineBackground(() => {
       extensionVersion: browser.runtime.getManifest().version,
       extensionId: browser.runtime.id,
       browser: navigator.userAgent.includes('Edg/') ? 'edge' : 'chrome',
+      actions: Object.keys(tabHandlers),
     }),
     onWelcome: (w) => {
       blockedHosts = w.blockedHosts ?? [];

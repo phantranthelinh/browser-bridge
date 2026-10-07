@@ -5,6 +5,7 @@
       "enum": [
         "navigate",
         "find_tab",
+        "activate_tab",
         "list_tabs",
         "close_tab",
         "close_session",
@@ -286,7 +287,7 @@
       "properties": {
         "url": {
           "type": "string",
-          "description": "Host to match: kimi.com also matches www.kimi.com. Path is ignored"
+          "description": "Host to match: example.com also matches www.example.com. Path is ignored"
         },
         "active": {
           "type": "boolean",
@@ -349,7 +350,7 @@
         },
         "protocolVersion": {
           "type": "integer",
-          "const": 1
+          "const": 2
         },
         "extensionVersion": {
           "type": "string"
@@ -363,6 +364,12 @@
             "chrome",
             "edge"
           ]
+        },
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -372,7 +379,8 @@
         "protocolVersion",
         "extensionVersion",
         "extensionId",
-        "browser"
+        "browser",
+        "actions"
       ],
       "title": "Hello"
     },
@@ -837,21 +845,13 @@
             "image/png",
             "image/jpeg"
           ]
-        },
-        "width": {
-          "type": "integer"
-        },
-        "height": {
-          "type": "integer"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "data",
-        "mimeType",
-        "width",
-        "height"
+        "mimeType"
       ],
       "title": "ScreenshotCapture"
     },
@@ -1237,7 +1237,7 @@
         },
         "protocolVersion": {
           "type": "integer",
-          "const": 1
+          "const": 2
         },
         "daemonVersion": {
           "type": "string"

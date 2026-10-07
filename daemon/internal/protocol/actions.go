@@ -35,7 +35,7 @@ type TabResult struct {
 }
 
 type FindTabArgs struct {
-	URL    string `json:"url,omitempty" jsonschema_description:"Host to match: kimi.com also matches www.kimi.com. Path is ignored"`
+	URL    string `json:"url,omitempty" jsonschema_description:"Host to match: example.com also matches www.example.com. Path is ignored"`
 	Active bool   `json:"active,omitempty" jsonschema_description:"Borrow the tab the user is looking at instead of searching the session's tabs"`
 }
 
@@ -193,13 +193,11 @@ type ScreenshotArgs struct {
 	Path     string `json:"path,omitempty" jsonschema_description:"Absolute file path to write. Parent folders are created and an existing file is overwritten. Default: ~/.browser-bridge/artifacts/"`
 }
 
-// ScreenshotCapture is what the extension sends back. The daemon writes the image to disk and
-// answers the agent with ScreenshotResult instead.
+// ScreenshotCapture is what the extension sends back. The daemon writes the image to disk, reads
+// its size from the image header and answers the agent with ScreenshotResult instead.
 type ScreenshotCapture struct {
 	Data     string `json:"data" jsonschema_description:"Base64-encoded image bytes"`
 	MimeType string `json:"mimeType" jsonschema:"enum=image/png,enum=image/jpeg"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
 }
 
 type ScreenshotResult struct {
@@ -276,6 +274,7 @@ type CDPArgs struct {
 var Actions = []Action{
 	{"navigate", "Open a URL in the session's current tab, or in a new background tab. Waits for the load event.", NavigateArgs{}, TabResult{}, navigationTimeoutMs},
 	{"find_tab", "Make an existing tab the session's current tab: search the session's tabs by host, or borrow the tab the user is looking at.", FindTabArgs{}, FindTabResult{}, actionTimeoutMs},
+	{"activate_tab", "Bring the current tab to the front and focus its window. Chrome holds back some things, such as starting video playback, until a tab has been visible.", NoArgs{}, TabResult{}, actionTimeoutMs},
 	{"list_tabs", "List the session's tabs.", NoArgs{}, ListTabsResult{}, actionTimeoutMs},
 	{"close_tab", "Close the current tab. A borrowed tab is only released, never closed.", NoArgs{}, CloseTabResult{}, actionTimeoutMs},
 	{"close_session", "Close every tab of the session, release borrowed tabs and remove the tab group.", NoArgs{}, CloseSessionResult{}, actionTimeoutMs},

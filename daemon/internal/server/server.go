@@ -144,12 +144,15 @@ type tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
+	// Available is false for an action the connected extension does not implement, and for every
+	// action while no extension is connected.
+	Available bool `json:"available"`
 }
 
 func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 	tools := make([]tool, 0, len(protocol.Actions))
 	for _, a := range protocol.Actions {
-		tools = append(tools, tool{Name: a.Name, Description: a.Description, InputSchema: protocol.InputSchema(a)})
+		tools = append(tools, tool{Name: a.Name, Description: a.Description, InputSchema: protocol.InputSchema(a), Available: s.hub.Implements(a.Name)})
 	}
 	writeJSONBody(w, http.StatusOK, tools)
 }

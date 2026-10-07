@@ -29,7 +29,7 @@ class FakeSocket implements SocketLike {
   }
 }
 
-const welcome: Welcome = { type: 'welcome', protocolVersion: 1, daemonVersion: '0.1.0', blockedHosts: ['bank.com'] };
+const welcome: Welcome = { type: 'welcome', protocolVersion: 2, daemonVersion: '0.1.0', blockedHosts: ['bank.com'] };
 
 function setup(onRequest = async (f: RequestFrame): Promise<ResponseFrame> => ({ type: 'response', id: f.id, ok: true, data: {} })) {
   const sockets: FakeSocket[] = [];
@@ -37,7 +37,7 @@ function setup(onRequest = async (f: RequestFrame): Promise<ResponseFrame> => ({
   const welcomes: Welcome[] = [];
   const conn = new Connection({
     url: async () => 'ws://127.0.0.1:9876/ws',
-    hello: () => ({ type: 'hello', protocolVersion: 1, extensionVersion: '0.1.0', extensionId: 'x', browser: 'chrome' }),
+    hello: () => ({ type: 'hello', protocolVersion: 2, extensionVersion: '0.1.0', extensionId: 'x', browser: 'chrome', actions: ['navigate'] }),
     onWelcome: (w) => welcomes.push(w),
     onRequest,
     onStatus: (s) => statuses.push(s),
@@ -64,7 +64,7 @@ describe('Connection', () => {
     const { conn, sockets, statuses, welcomes } = setup();
     await conn.connect();
     sockets[0]!.open();
-    expect(JSON.parse(sockets[0]!.sent[0]!)).toMatchObject({ type: 'hello', protocolVersion: 1 });
+    expect(JSON.parse(sockets[0]!.sent[0]!)).toMatchObject({ type: 'hello', protocolVersion: 2, actions: ['navigate'] });
     expect(conn.connected).toBe(false);
     sockets[0]!.receive(welcome);
     expect(conn.connected).toBe(true);

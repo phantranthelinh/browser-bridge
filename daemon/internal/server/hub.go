@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -190,9 +191,9 @@ func (h *Hub) Ready() *protocol.Error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.mismatch != nil {
-		hint := "The extension is older than the daemon: rebuild it and reload it in chrome://extensions"
+		hint := "The extension is older than the daemon: click Reload on Browser Bridge in chrome://extensions"
 		if h.mismatch.ProtocolVersion > protocol.ProtocolVersion {
-			hint = "The daemon is older than the extension: rebuild bridge and run bridge restart"
+			hint = "The daemon is older than the extension: install the matching bridge, then run bridge restart"
 		}
 		return &protocol.Error{
 			Code:    protocol.ErrVersionMismatch,
@@ -252,6 +253,14 @@ func (h *Hub) forget(id string) {
 
 func timeoutResponse(action string) protocol.Response {
 	return protocol.Fail(protocol.ErrTimeout, action+" did not finish before timeoutMs", "Retry with a larger timeoutMs, or check the page with snapshot")
+}
+
+// Implements reports whether the connected extension can run action. With no extension connected
+// nothing can run.
+func (h *Hub) Implements(action string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.conn != nil && slices.Contains(h.hello.Actions, action)
 }
 
 func (h *Hub) Status() ExtensionStatus {

@@ -43,6 +43,8 @@ func TestValidateArgs(t *testing.T) {
 		{"navigate", `{}`, false, "url"},
 		{"navigate", `{"url":"https://a.com","bogus":1}`, false, "bogus"},
 		{"list_tabs", ``, true, ""},
+		{"activate_tab", `{}`, true, ""},
+		{"activate_tab", `{"tabId":1}`, false, "tabId"},
 		{"list_tabs", `null`, true, ""},
 		{"list_tabs", `{"x":1}`, false, "x"},
 		{"fill", `{"selector":"@e1","value":""}`, true, ""},

@@ -16,7 +16,7 @@ export function httpHost(url: string | undefined): string | null {
   }
 }
 
-/** Reads the host from what an agent passes to find_tab: "kimi.com", "www.kimi.com/chat" or a full URL. */
+/** Reads the host from what an agent passes to find_tab: "example.com", "www.example.com/chat" or a full URL. */
 export function queryHost(query: string): string | null {
   return httpHost(query.includes('://') ? query : `http://${query}`);
 }

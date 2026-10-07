@@ -103,7 +103,7 @@ var onePixelPNG, _ = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAA
 
 func screenshotExt(mime string) fakeext.Handler {
 	return func(protocol.RequestFrame) (protocol.Response, bool) {
-		data, _ := json.Marshal(protocol.ScreenshotCapture{Data: base64.StdEncoding.EncodeToString(onePixelPNG), MimeType: mime, Width: 1, Height: 1})
+		data, _ := json.Marshal(protocol.ScreenshotCapture{Data: base64.StdEncoding.EncodeToString(onePixelPNG), MimeType: mime})
 		return protocol.Response{OK: true, Data: data}, true
 	}
 }
@@ -121,7 +121,7 @@ func TestScreenshotDefaultPath(t *testing.T) {
 		t.Fatalf("path = %s", r.Path)
 	}
 	got, _ := os.ReadFile(r.Path)
-	if !bytes.Equal(got, onePixelPNG) || r.SizeBytes != int64(len(onePixelPNG)) || r.MimeType != "image/png" || r.Width != 1 {
+	if !bytes.Equal(got, onePixelPNG) || r.SizeBytes != int64(len(onePixelPNG)) || r.MimeType != "image/png" || r.Width != 1 || r.Height != 1 {
 		t.Fatalf("result %+v does not match the file", r)
 	}
 	if strings.Contains(string(resp.Data), `"data"`) {
@@ -155,6 +155,16 @@ func TestScreenshotExplicitPath(t *testing.T) {
 	}
 	status, resp := h.command(`{"action":"screenshot","args":{"path":"shot.png"},"session":"s1"}`)
 	expectError(t, status, resp, 400, protocol.ErrInvalidRequest)
+}
+
+func TestScreenshotThatIsNotAnImageIsInternal(t *testing.T) {
+	h := newHarness(t, home.Config{})
+	h.connect(fakeext.Options{Handler: func(protocol.RequestFrame) (protocol.Response, bool) {
+		data, _ := json.Marshal(protocol.ScreenshotCapture{Data: base64.StdEncoding.EncodeToString([]byte("not an image")), MimeType: "image/png"})
+		return protocol.Response{OK: true, Data: data}, true
+	}})
+	status, resp := h.command(`{"action":"screenshot","session":"s1"}`)
+	expectError(t, status, resp, 200, protocol.ErrInternal)
 }
 
 func TestScreenshotBadCaptureIsInternal(t *testing.T) {

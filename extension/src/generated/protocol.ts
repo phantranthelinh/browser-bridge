@@ -7,6 +7,7 @@
 export type ActionName =
   | 'navigate'
   | 'find_tab'
+  | 'activate_tab'
   | 'list_tabs'
   | 'close_tab'
   | 'close_session'
@@ -192,7 +193,7 @@ export interface FillResult {
  */
 export interface FindTabArgs {
   /**
-   * Host to match: kimi.com also matches www.kimi.com. Path is ignored
+   * Host to match: example.com also matches www.example.com. Path is ignored
    */
   url?: string;
   /**
@@ -227,10 +228,11 @@ export interface HandleDialogArgs {
  */
 export interface Hello {
   type: 'hello';
-  protocolVersion: 1;
+  protocolVersion: 2;
   extensionVersion: string;
   extensionId: string;
   browser: 'chrome' | 'edge';
+  actions: string[];
 }
 /**
  * This interface was referenced by `BrowserBridgeProtocol`'s JSON-Schema
@@ -449,8 +451,6 @@ export interface ScreenshotCapture {
    */
   data: string;
   mimeType: 'image/png' | 'image/jpeg';
-  width: number;
-  height: number;
 }
 /**
  * This interface was referenced by `BrowserBridgeProtocol`'s JSON-Schema
@@ -604,7 +604,7 @@ export interface WaitForResult {
  */
 export interface Welcome {
   type: 'welcome';
-  protocolVersion: 1;
+  protocolVersion: 2;
   daemonVersion: string;
   blockedHosts: string[];
 }

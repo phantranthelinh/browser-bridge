@@ -8,7 +8,7 @@ import "encoding/json"
 
 const (
 	Version         = "0.1.0"
-	ProtocolVersion = 1
+	ProtocolVersion = 2
 	// DefaultExtensionID follows from the public key in extension/manifest-key.txt;
 	// TestDefaultExtensionIDMatchesManifestKey fails if the two drift apart.
 	DefaultExtensionID = "nfjidhefdgblbbfhnmbcogkbphipngif"

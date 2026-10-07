@@ -164,7 +164,7 @@ func TestStatus(t *testing.T) {
 	var st statusBody
 	h.getJSON("/status", &st)
 	addr := h.ts.Listener.Addr().String()
-	if !st.Running || st.Version != protocol.Version || st.ProtocolVersion != 1 || !strings.HasSuffix(addr, ":"+strconv.Itoa(st.Port)) || st.Extension.Connected {
+	if !st.Running || st.Version != protocol.Version || st.ProtocolVersion != protocol.ProtocolVersion || !strings.HasSuffix(addr, ":"+strconv.Itoa(st.Port)) || st.Extension.Connected {
 		t.Fatalf("status = %+v", st)
 	}
 	h.connect(fakeext.Options{})
@@ -207,5 +207,39 @@ func TestTools(t *testing.T) {
 	h.getJSON("/tools", &raw)
 	if strings.Contains(string(raw[0]), "$schema") {
 		t.Error("inputSchema must be inline, without $schema")
+	}
+}
+
+func TestToolsMarkWhatTheConnectedExtensionImplements(t *testing.T) {
+	h := newHarness(t, home.Config{})
+	available := func() map[string]bool {
+		var tools []struct {
+			Name      string `json:"name"`
+			Available *bool  `json:"available"`
+		}
+		h.getJSON("/tools", &tools)
+		m := map[string]bool{}
+		for _, tl := range tools {
+			if tl.Available == nil {
+				t.Fatalf("%s has no available field", tl.Name)
+			}
+			m[tl.Name] = *tl.Available
+		}
+		return m
+	}
+	for name, ok := range available() {
+		if ok {
+			t.Errorf("%s is available with no extension connected", name)
+		}
+	}
+	ext := h.connect(fakeext.Options{Actions: []string{"navigate", "snapshot"}})
+	got := available()
+	if !got["navigate"] || !got["snapshot"] || got["click"] || len(got) != len(protocol.Actions) {
+		t.Fatalf("available = %v", got)
+	}
+	ext.Close()
+	waitDisconnected(t, h.srv.hub)
+	if available()["navigate"] {
+		t.Error("navigate stays available after the extension disconnected")
 	}
 }
