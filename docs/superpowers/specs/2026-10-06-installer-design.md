@@ -21,7 +21,7 @@ Kimi's `install.ps1` (the real one was read) only downloads `kimi-webbridge.exe`
 ### 1.2 Decisions made
 
 - **Extension is loaded unpacked**, not published to the Store (keeping base spec §1.3). The script downloads the extension to a fixed folder and guides the user through Load unpacked.
-- **Build now** on what already exists (8 tab actions, called over HTTP). `install-skill` and MCP configuration will be added to the script when the CLI plan is complete.
+- **Build now** on what already exists (8 tab actions, called over HTTP). `install-skill` and MCP configuration will be added to the script when the CLI plan is complete. (Done: the script runs `bridge install-skill`, §3.2 step 5.)
 - **No autostart at login**, same as Kimi. The script starts the daemon at install time; after the machine restarts, the user (later the agent, following `SKILL.md` or `bridge mcp`) runs `bridge start`.
 - **Built with GitHub Actions, distributed through GitHub Releases.** The repo is public, so downloads need no login.
 - Windows amd64 only (Windows ARM machines run the amd64 build through emulation). The script runs on Windows PowerShell 5.1 and PowerShell 7.
@@ -40,7 +40,6 @@ Re-running the install command while the daemon is running updates it without er
 - Installing the extension automatically, publishing to the Store.
 - Code-signing the `.exe` file.
 - Starting the daemon automatically at login.
-- `install-skill`, `bridge mcp`, `SKILL.md` (part of the CLI plan).
 - macOS/Linux (`install.sh`).
 
 ## 2. Release files
@@ -71,6 +70,7 @@ iex "& { $(irm <url>/install.ps1) } -Uninstall"                                 
 | `-NoStart` | Install but do not start the daemon (and therefore do not wait for the extension) |
 | `-NoPath` | Do not modify `PATH` |
 | `-NoWait` | Do not wait for the extension to connect (for scripts and CI) |
+| `-NoSkill` | Do not add the browser-bridge skill to Claude Code and Codex |
 | `-Uninstall` | Uninstall (§3.4) |
 
 | Environment variable | Meaning |
@@ -89,12 +89,15 @@ Download source: `BRIDGE_INSTALL_BASE` if set; otherwise `https://github.com/pha
 2. Download `bridge-windows-amd64.exe` to a temp file (retry 3 times, 5 seconds apart), then move it to `bin\bridge.exe`.
 3. Download `browser-bridge-extension.zip`, extract it to a temp folder, check that `manifest.json` exists, delete the old `extension\`, then move the new folder in. The `extension\` path always stays the same, so an extension that was Loaded unpacked once keeps working across updates.
 4. Unless `-NoPath` is set: add `bin\` to the user's `PATH` (HKCU), and to `$env:Path` of the current window.
-5. Unless `-NoStart` is set: run `bridge start`.
-6. Unless `-NoStart` or `-NoWait` is set: read `bridge status`.
-   - Extension already connected (an update): report done, and remind the user to click Reload in `chrome://extensions` because the extension code just changed.
-   - Not connected (first install): print the 3 steps (open `chrome://extensions`, turn on Developer mode, Load unpacked → `<BRIDGE_HOME>\extension`), copy that path to the clipboard, then wait up to 3 minutes, checking every 2 seconds, and report when the extension connects. Ctrl+C skips the wait; everything has already been installed.
+5. Unless `-NoSkill` is set: run `bridge install-skill`, which adds the skill to Claude Code and Codex when they are installed and prints the MCP configuration (base spec §9.2).
+6. Unless `-NoStart` is set: run `bridge start`.
+7. Unless `-NoStart` is set: read `bridge status`. With `-NoWait` the script reports what it sees and does not wait.
+   - Extension connected: report done. If the connected extension's version differs from the daemon's, Chrome still runs the old build: ask for a Reload in `chrome://extensions`.
+   - Not connected, first install (`extension\manifest.json` did not exist before step 3): print the 3 steps (open `chrome://extensions`, turn on Developer mode, Load unpacked → `<BRIDGE_HOME>\extension`) and copy that path to the clipboard.
+   - Not connected, update: ask for a Reload, with Load unpacked as a fallback in one line. The old build is most likely loaded and reconnects within 30 seconds; nothing is connected yet only because the daemon just restarted.
    - `/status` shows a protocol version mismatch: report that the extension needs a Reload.
-7. Print a summary: the installed version, the daemon address, the `bridge status` command, and a one-line security warning (§6).
+   - Without `-NoWait`: wait up to 3 minutes, checking every 2 seconds, and report when the extension connects (or that it needs a Reload, once). Ctrl+C skips the wait; everything has already been installed.
+8. Print a summary: the installed version, the daemon address, the `bridge status`, `bridge call` and `bridge mcp` commands, and a one-line security warning (§6).
 
 ### 3.3 Errors
 
@@ -105,9 +108,10 @@ Download source: `BRIDGE_INSTALL_BASE` if set; otherwise `https://github.com/pha
 ### 3.4 Uninstall (`-Uninstall`)
 
 1. `bridge stop` (if `bin\bridge.exe` exists).
-2. Remove `bin\` from the user's `PATH`.
-3. Delete exactly what bridge created in `BRIDGE_HOME`: `bin\`, `extension\`, `logs\`, `artifacts\`, `config.json`, `daemon.pid`, `daemon.addr`. Then delete `BRIDGE_HOME` only if it is empty. Do not recursively delete the whole `BRIDGE_HOME`, because a `BRIDGE_HOME` pointed at the wrong place (for example the user folder) would lose all its data.
-4. Remind the user to remove the extension in `chrome://extensions`; Chrome will show an error for an extension whose folder has been deleted.
+2. `bridge install-skill --remove`, which deletes the skill from Claude Code and Codex.
+3. Remove `bin\` from the user's `PATH`.
+4. Delete exactly what bridge created in `BRIDGE_HOME`: `bin\`, `extension\`, `logs\`, `artifacts\`, `config.json`, `daemon.pid`, `daemon.addr`. Then delete `BRIDGE_HOME` only if it is empty. Do not recursively delete the whole `BRIDGE_HOME`, because a `BRIDGE_HOME` pointed at the wrong place (for example the user folder) would lose all its data.
+5. Remind the user to remove the extension in `chrome://extensions`; Chrome will show an error for an extension whose folder has been deleted.
 
 ## 4. CLI commands needed by the installer
 

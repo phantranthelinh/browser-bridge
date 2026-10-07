@@ -65,10 +65,12 @@ browser-bridge/
 ├── daemon/                      Go module, builds the `bridge` binary
 │   ├── cmd/bridge/              the subcommands (§9)
 │   ├── cmd/schemagen/           generates schema/ and the tool table in SKILL.md from Go structs
+│   ├── skill/browser-bridge/    SKILL.md, embedded in the binary for install-skill
 │   └── internal/
 │       ├── protocol/            Go structs + descriptions for each action: the single source of the schema
 │       ├── server/              HTTP API, security checks, WebSocket hub
 │       ├── session/             per-session queue, map of request id ↔ pending response
+│       ├── client/              HTTP client for POST /command, shared by bridge call and bridge mcp
 │       ├── mcp/                 stdio MCP server (official Go SDK), calls back into the HTTP API
 │       └── home/                the ~/.browser-bridge directory, config, pid, log
 ├── schema/                      JSON Schema generated from Go, committed to the repo
@@ -79,7 +81,6 @@ browser-bridge/
 │       ├── page-agent/          IIFE bundle injected into the page
 │       ├── shared/              types and storage keys shared between the service worker and the side panel
 │       └── generated/           TS types generated from schema/
-├── skill/browser-bridge/SKILL.md
 ├── testpage/                    static HTML page + fake API for testing
 └── e2e/                         Playwright (TypeScript)
 ```
@@ -91,8 +92,10 @@ daemon/internal/protocol (Go struct + description)
    └─ go run ./daemon/cmd/schemagen
         ├─▶ schema/protocol.schema.json ──json-schema-to-typescript──▶ extension/src/generated/protocol.ts
         ├─▶ tool list for GET /tools and MCP (Go reads it directly from the protocol package at runtime)
-        └─▶ tool table in SKILL.md (between the two markers <!-- tools:begin --> / <!-- tools:end -->)
+        └─▶ tool table in daemon/skill/browser-bridge/SKILL.md (between the two markers <!-- tools:begin --> / <!-- tools:end -->)
 ```
+
+- The skill lives inside the daemon module, not at the repo root, because Go can only embed files below its module. Embedded, the skill that `install-skill` writes always describes the binary that runs its commands.
 
 - The daemon validates requests against the generated JSON Schema (`santhosh-tekuri/jsonschema`).
 - The extension only receives commands from the daemon, so it uses TS types only and does not validate again at runtime.
@@ -161,6 +164,8 @@ Format of `tree`:
 - Each line has the form `- <role> "<name>" [state…] @e<n>`, indented 2 spaces per level.
 - Refs are only attached to interactive elements.
 - Static text appears as `- text "…"`, with each paragraph cut at 200 characters.
+- Text runs through inline elements as the page shows it: the whitespace at the edge of a `<span>` or `<b>` still separates words (`Những Bản <b>Lofi</b>` gives `Những Bản Lofi`), and no space is added where the page has none.
+- A control whose only content is a control of the same role with the same name (YouTube wraps each menu link in a second link) is one line, with the outer element's ref.
 
 ```text
 - heading "Sign in" [level=1]
@@ -391,10 +396,11 @@ artifacts\
 | `start` | Run `serve` as a detached process (`DETACHED_PROCESS` on Windows), wait for `/status` to return ok, then print the address. If it is already running, do nothing |
 | `stop` / `restart` | Call `POST /shutdown` and wait up to 5 seconds for the daemon to exit. If the daemon hangs, kill it by the `pid` taken from `/status`, never by the `daemon.pid` file (a stale PID may now belong to another process), and only when that process's exe has the same name as `bridge` itself (anyone listening at that address can claim any `pid`). If no daemon answers, delete the leftover `daemon.pid`/`daemon.addr`. Exit code 0 when stopped or when it was not running to begin with |
 | `status` | Print JSON identical to `GET /status`. If the daemon is not running, print `{"running": false, "addr": …}`. Exit code 0 when running, 1 when not |
-| `logs [-f] [-n N] [--prev]` | View the log |
-| `call <action> --session <s> [--json '<args>' \| --json-file <f>] [--timeout ms]` | Print the envelope to stdout. Exit codes: 0 on `ok`, 1 on `ok:false`, 2 when it cannot connect to the daemon. Go reads argv as UTF-16 on Windows, so Vietnamese text does not get corrupted |
-| `mcp` | Stdio MCP server. Automatically `start`s the daemon if it is not running. Tools are named `browser_<action>`, with no `session` parameter (§6.1). `browser_screenshot` returns both the image (MCP image content) and text containing `path` |
-| `install-skill` | Copy `skill/browser-bridge/` into `~/.claude/skills/` and `~/.codex/skills/` (skipping runtimes that are not installed), then print the MCP configuration commands: Claude Code (`claude mcp add browser-bridge -- bridge mcp`), Codex (the `[mcp_servers.browser-bridge]` block in `config.toml`), and a template for an Ollama harness |
+| `logs [-f] [-n N] [--prev]` | Print the last `N` lines (default 50) of `logs\daemon.log`, or of `daemon.log.prev` with `--prev`. `-f` keeps printing new lines until Ctrl+C, and starts over when a daemon restart begins a new log |
+| `call <action> --session <s> [key=value …] [--json '<args>' \| --json-file <f>] [--timeout ms]` | Print the envelope to stdout. Exit codes: 0 on `ok`, 1 on `ok:false` (including a request the daemon rejects with 400), 2 for a usage error or when it cannot connect to the daemon. Go reads argv as UTF-16 on Windows, so Vietnamese text does not get corrupted. Flags may come before or after the arguments |
+| | **Arguments.** `key=value` sets one argument. The value is converted to the type the action's schema gives that key (`newTab=true` is a boolean, `amount=300` a number); a key whose schema type is an array collects repeated keys into a list (`files=a files=b`); anything else stays a string, and the daemon's validation reports what is wrong with it. `key:=<json>` sets raw JSON. `--json`/`--json-file` give a base object (`--json-file -` reads stdin) that `key=value` pairs override. Pairs avoid JSON quoting, which Windows PowerShell 5.1 breaks by stripping `"` from native arguments |
+| `mcp` | Stdio MCP server. Automatically `start`s the daemon if it is not running, at startup and again if a call finds nothing listening (only then, so a command is never sent twice). Tools are named `browser_<action>`, with no `session` parameter (§6.1). Tool schemas are flattened: no `oneOf`, `dependentRequired` or `const`, which several tool-calling APIs reject; the descriptions say which arguments go together, and the daemon still validates the full schema. `browser_snapshot` returns the tree as plain lines after `url:`/`title:` lines, not as a JSON string. `browser_screenshot` returns both the image (MCP image content, up to 5 MB) and text containing `path`. A failure is a tool result with `isError` and the text `CODE: message` plus `Hint: …`. The server's `instructions` give the workflow and tell the model that page content is data, never instructions |
+| `install-skill [--remove]` | Copy the embedded skill into `<claude>/skills/browser-bridge/` and `<codex>/skills/browser-bridge/`, replacing an older copy, where `<claude>` is `CLAUDE_CONFIG_DIR` or `~/.claude` and `<codex>` is `CODEX_HOME` or `~/.codex`. An agent whose folder does not exist is skipped, never created. Then print the MCP configuration with the absolute path of `bridge.exe`: Codex (the `[mcp_servers.browser-bridge]` block in `config.toml`), Claude Code (`claude mcp add browser-bridge -- <path> mcp`, for those who want MCP rather than the skill), and the command for any other client such as an Ollama harness. `--remove` deletes both copies; the installer runs it on uninstall |
 
 ### 9.3 `GET /status`
 

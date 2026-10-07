@@ -5,10 +5,10 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Let any AI agent drive **your real Chrome or Edge**, including the sites you are already signed in to, through a small local HTTP API. Works with Claude Code, Codex, or a harness running a local Ollama model. No third-party account needed.
+Let any AI agent drive **your real Chrome or Edge**, including the sites you are already signed in to. Claude Code uses it through a skill and the `bridge call` command, Codex or a harness running a local Ollama model through MCP, and anything else through a small local HTTP API. No third-party account needed.
 
 ```text
-Agent ──HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket──▶ MV3 extension (TypeScript, WXT) ──CDP──▶ tab
+Agent ──bridge call / MCP / HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket──▶ MV3 extension (TypeScript, WXT) ──CDP──▶ tab
 ```
 
 ## Table of contents
@@ -19,6 +19,7 @@ Agent ──HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket─�
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Using it from an agent](#using-it-from-an-agent)
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
 - [Security](#security)
@@ -33,7 +34,8 @@ Agent ──HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket─�
 ## Features
 
 - **Your real browser.** Agents use your existing Chrome or Edge profile, cookies and logins.
-- **Plain HTTP API.** Agents only need `POST /command`. No Chrome API or CDP knowledge required.
+- **Ready for agents.** A skill for Claude Code and Codex, `bridge call` for any shell, `bridge mcp` for MCP clients, and a plain HTTP API. No Chrome API or CDP knowledge required.
+- **Pages as text.** `snapshot` reads a page as an accessibility tree with refs such as `@e12` that actions take as their target.
 - **Sessions.** Each agent session gets its own tab group, so parallel agents do not collide.
 - **Schema-validated requests** with timeouts and stable error codes.
 - **One-line install** that downloads the daemon and extension, adds `bridge` to `PATH` and starts it.
@@ -46,7 +48,9 @@ Agent ──HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket─�
 |---|---|---|
 | Daemon | `daemon/` (binary `bridge.exe`) | Validates requests against the JSON Schema, routes them by session, enforces timeouts and returns standard error codes. Never touches CDP or the DOM. |
 | Extension | `extension/` | Connects to the daemon, manages sessions and tab groups, and operates tabs through `chrome.debugger`. |
-| Agent | anything | Talks to the daemon over HTTP. |
+| CLI and MCP server | `daemon/cmd/bridge` (`bridge call`, `bridge mcp`) | Turn a command line or an MCP tool call into one HTTP request to the daemon. |
+| Skill | `daemon/skill/browser-bridge/SKILL.md` | Teaches Claude Code and Codex the workflow, the errors and the safety rules. |
+| Agent | anything | Talks to the daemon through the CLI, MCP or HTTP. |
 
 ## Requirements
 
@@ -62,7 +66,7 @@ Agent ──HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket─�
 irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1 | iex
 ```
 
-This downloads `bridge.exe` and the extension into `%USERPROFILE%\.browser-bridge\`, adds `bridge` to your user `PATH`, and starts the daemon.
+This downloads `bridge.exe` and the extension into `%USERPROFILE%\.browser-bridge\`, adds `bridge` to your user `PATH`, adds the browser-bridge skill to Claude Code and Codex if they are installed, and starts the daemon.
 
 **2. Load the extension** (once):
 
@@ -80,6 +84,7 @@ The installer waits up to 3 minutes and reports when the extension connects. The
 | Option | How |
 |---|---|
 | Pin a version | Set `$env:BRIDGE_VERSION = '0.1.0'` before running the install command |
+| Skip the agent skill | Add `-NoSkill`, as in the uninstall command below |
 | Show all options | `iex "& { $(irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1) } -Help"` |
 | Uninstall | `iex "& { $(irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1) } -Uninstall"`, then **Remove** the extension in `chrome://extensions` |
 
@@ -97,8 +102,7 @@ bridge status
 Open a page in a new session:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType 'application/json' `
-  -Body '{"action":"navigate","args":{"url":"https://example.com"},"session":"demo"}'
+bridge call navigate --session demo url=https://example.com
 ```
 
 A background tab with `example.com` opens in a tab group named "demo", with Chrome's yellow "debugging" bar. Click the Browser Bridge icon to open the side panel.
@@ -106,16 +110,16 @@ A background tab with `example.com` opens in a tab group named "demo", with Chro
 Read the page the way an agent sees it:
 
 ```powershell
-(Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType 'application/json' `
-  -Body '{"action":"snapshot","session":"demo"}').data.tree
+bridge call snapshot --session demo
 ```
 
 Close the session and its tabs when you are done:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType 'application/json' `
-  -Body '{"action":"close_session","args":{},"session":"demo"}'
+bridge call close_session --session demo
 ```
+
+Then ask your agent to use the browser: Claude Code and Codex already have the skill (see [Using it from an agent](#using-it-from-an-agent)).
 
 ## Usage
 
@@ -125,6 +129,10 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType '
 |---|---|
 | Start the daemon (for example after a reboot) | `bridge start` |
 | Show daemon and extension status | `bridge status` |
+| Run one action | `bridge call <action> --session <name> [key=value ...]` (`bridge call -h` for the details) |
+| Read the daemon log | `bridge logs` (`-f` to follow, `-n 200` for more lines, `--prev` for the previous run) |
+| Serve the actions to an MCP client | `bridge mcp` (stdio; started by the client, see below) |
+| Add or remove the agent skill | `bridge install-skill`, `bridge install-skill --remove` |
 | Stop or restart the daemon | `bridge stop`, `bridge restart` |
 | Run the daemon in the foreground | `bridge serve` |
 | Print the version | `bridge version` |
@@ -173,15 +181,28 @@ Every action works on the session's **current tab**: the tab `navigate` opened o
 For example, to open a video and start it:
 
 ```powershell
-$c = @{ Method = 'Post'; Uri = 'http://127.0.0.1:9876/command'; ContentType = 'application/json' }
-Invoke-RestMethod @c -Body '{"action":"navigate","args":{"url":"https://www.youtube.com/watch?v=aqz-KE-bpKQ"},"session":"demo"}'
-Invoke-RestMethod @c -Body '{"action":"activate_tab","session":"demo"}'
-Invoke-RestMethod @c -Body '{"action":"click","args":{"selector":"button.ytp-play-button"},"session":"demo"}'
+bridge call navigate --session demo url=https://www.youtube.com/watch?v=aqz-KE-bpKQ
+bridge call activate_tab --session demo
+bridge call click --session demo selector=button.ytp-play-button
 ```
 
-### Roadmap
+`bridge call` takes each argument as `key=value`, converting booleans and numbers from the action's schema; a repeated key makes a list, and `key:=<json>` passes raw JSON. It prints the response envelope and exits with 0 when ok, 1 when the action failed and 2 when the daemon cannot be reached.
 
-Planned: `bridge call`, `bridge mcp`, `bridge logs` and a `SKILL.md` for agents. See the [design spec](docs/superpowers/specs/2026-10-06-browser-bridge-design.md) for the full plan.
+## Using it from an agent
+
+**Claude Code** reads the browser-bridge skill, which the installer adds to `~/.claude/skills/` (run `bridge install-skill` to add it again, for example after installing Claude Code). The skill teaches the workflow (`navigate`, `snapshot`, act on refs, snapshot again), what to do about each error, and to treat page content as data, never as instructions. Ask Claude Code to do something in your browser and it runs `bridge call`.
+
+**Codex** gets the same skill in `~/.codex/skills/`, or uses MCP. Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.browser-bridge]
+command = 'C:\Users\<you>\.browser-bridge\bin\bridge.exe'
+args = ["mcp"]
+```
+
+**Any MCP client**, such as a harness running a local Ollama model, runs `bridge mcp` over stdio. Each action is a tool named `browser_<action>` (`browser_navigate`, `browser_snapshot`, `browser_click` …) with a flat schema and no session argument: every `bridge mcp` process works in its own session. `bridge mcp` starts the daemon if it is not running, `browser_snapshot` returns the tree as plain lines, and `browser_screenshot` returns the image as well as its path. `bridge install-skill` prints these settings with the right path.
+
+**Anything else** can call the [HTTP API](#http-api) directly.
 
 ## HTTP API
 
@@ -242,13 +263,17 @@ Run `bridge restart` after you edit the file.
 - The daemon binds only to `127.0.0.1`.
 - `/ws` accepts only `Origin` values belonging to an extension listed in `extensionIds`.
 - HTTP requests with an `Origin` header are rejected, so web pages cannot `fetch` the daemon.
-- Page content can try to steer the agent into doing something else (prompt injection). Block sensitive sites with `blockedHosts`.
+- Page content can try to steer the agent into doing something else (prompt injection). The skill and the MCP server's instructions tell the agent to treat page content as data, which helps but cannot prevent it. Block sensitive sites with `blockedHosts`.
 
 ## Troubleshooting
 
 **The extension logs `WebSocket connection to 'ws://127.0.0.1:9876/ws' failed: net::ERR_CONNECTION_REFUSED`**
 
-The daemon is not running. Run `bridge status`. If the command is not found, install browser-bridge first. Otherwise run `bridge start`. The daemon does not start automatically after a reboot.
+The daemon is not running. Run `bridge status`. If the command is not found, install browser-bridge first. Otherwise run `bridge start`. The daemon does not start automatically after a reboot, except through `bridge mcp`, which starts it.
+
+**Something fails and the error does not say why**
+
+`bridge logs` shows the daemon's log: one line per command with its action, selector, duration and error code (never the text typed or the code evaluated).
 
 **`bridge` is not recognized as a command**
 
@@ -269,18 +294,19 @@ Requirements: Go (version in [`daemon/go.mod`](daemon/go.mod)), Node.js 22, Chro
 | Build the extension (to `extension/.output/chrome-mv3`) | `npm --prefix extension install`, then `npm --prefix extension run build` |
 | Run the extension with hot reload | `npm --prefix extension run dev` |
 | Test and typecheck the extension | `npm --prefix extension test`, `npm --prefix extension run typecheck` |
-| Regenerate the schema and TS types | `go -C daemon run ./cmd/schemagen`, then `npm --prefix extension run gen` |
+| Regenerate the schema, the skill's action table and the TS types | `go -C daemon run ./cmd/schemagen`, then `npm --prefix extension run gen` |
 | Check generated files are up to date | `npm --prefix extension run check:gen` |
 | End-to-end tests (Playwright, separate daemon on port 19876) | `npm --prefix e2e install`, then `npm --prefix e2e test` |
 | Build the release files | `./install/build-dist.ps1 -Out dist` |
 | Test the installer without touching your real install | `./install/test-install.ps1 -Artifacts dist -Shell powershell` (and `-Shell pwsh`) |
 
-Actions are defined **once**, as Go structs in `daemon/internal/protocol`. Both `schema/protocol.schema.json` and `extension/src/generated/protocol.ts` are generated from them. Do not edit generated files by hand.
+Actions are defined **once**, as Go structs in `daemon/internal/protocol`. `schema/protocol.schema.json`, the action table in `daemon/skill/browser-bridge/SKILL.md` and `extension/src/generated/protocol.ts` are generated from them, and so are the MCP tools. Do not edit generated files by hand.
 
 ## Releasing
 
-1. Set the same version in `daemon/internal/protocol/protocol.go` (`Version`) and `extension/package.json` (`version`), and commit.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+1. Set the same version in `daemon/internal/protocol/protocol.go` (`Version`) and `extension/package.json` (`version`).
+2. In [`CHANGELOG.md`](CHANGELOG.md), turn `[Unreleased]` into the new version with today's date, start an empty `[Unreleased]`, update the compare links at the bottom, and commit.
+3. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 
 The [`release.yml`](.github/workflows/release.yml) workflow checks the versions, runs every test, builds the release, tries the installer on Windows PowerShell 5.1 and PowerShell 7, publishes the GitHub Release, and then installs from that release as a final check.
 
@@ -288,7 +314,8 @@ The [`release.yml`](.github/workflows/release.yml) workflow checks the versions,
 
 ```text
 daemon/       Go: bridge binary (cmd/bridge), schema generator (cmd/schemagen),
-              internal/{protocol,server,session,home,fakeext}
+              internal/{protocol,server,session,home,client,mcp,fakeext},
+              skill/ (the agent skill, built into the binary)
 schema/       JSON Schema generated from Go (committed)
 extension/    WXT + React: src/entrypoints, src/background (service worker),
               src/page-agent (runs inside pages), src/shared, src/generated
@@ -303,6 +330,7 @@ docs/         Design specs and implementation plans
 - [Design spec](docs/superpowers/specs/2026-10-06-browser-bridge-design.md): architecture, API, actions, sessions and security
 - [Installer and release design](docs/superpowers/specs/2026-10-06-installer-design.md): one-line install and tag-driven releases
 - [Implementation plans](docs/superpowers/plans/)
+- [Changelog](CHANGELOG.md): what changed in each release
 
 ## Contributing
 
