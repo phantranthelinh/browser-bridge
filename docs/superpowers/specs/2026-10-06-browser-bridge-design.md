@@ -103,7 +103,7 @@ daemon/internal/protocol (Go struct + description)
 | Endpoint | Description |
 |---|---|
 | `POST /command` | Run one action |
-| `GET /tools` | `[{name, description, inputSchema}]`, usable as a function definition for any LLM |
+| `GET /tools` | `[{name, description, inputSchema, available}]`, usable as a function definition for any LLM. `available` is whether the connected extension implements the action (it lists them in `hello`, §10); with no extension connected every action is `false` |
 | `GET /status` | Daemon and extension status (§9.3) |
 | `GET /ws` | WebSocket, for the extension only (§6) |
 | `POST /shutdown` | The daemon returns 200, shuts down gracefully and deletes `daemon.pid`/`daemon.addr` itself. Used by `bridge stop`; goes through the same security checks as `/command` |
@@ -144,7 +144,8 @@ daemon/internal/protocol (Go struct + description)
 | Action | Args | Returns `data` | Notes |
 |---|---|---|---|
 | `navigate` | `url` (required), `newTab` (bool, default false), `groupTitle` | `tabId, url, title` | If the session has no current tab, it always creates a new tab. New tabs open in the background (`active:false`). `groupTitle` is only used when creating the group, and defaults to the session name. Only `http`, `https`, `about:blank` are accepted. Returns only after the load event completes |
-| `find_tab` | `url` (matched by host, `kimi.com` also matches `www.kimi.com`, path ignored), `active` (bool) | `tabId, url, title, borrowed` | Requires `url`, `active:true`, or both. By default it only searches the session's own tabs. With `active:true` it borrows the tab the user is currently viewing, and that tab is not pulled into the group. The result becomes the session's current tab |
+| `find_tab` | `url` (matched by host, `example.com` also matches `www.example.com`, path ignored), `active` (bool) | `tabId, url, title, borrowed` | Requires `url`, `active:true`, or both. By default it only searches the session's own tabs. With `active:true` it borrows the tab the user is currently viewing, and that tab is not pulled into the group. The result becomes the session's current tab |
+| `activate_tab` | — | `tabId, url, title` | Makes the current tab the active tab of its window and focuses the window. Tabs stay in the background otherwise, and Chrome defers some things, such as starting media, in a tab that has never been visible |
 | `list_tabs` | — | `tabs: [{tabId, url, title, current, borrowed}]` | Session tabs only |
 | `close_tab` | — | `closed, released` | A session tab is closed. A borrowed tab is only released (detached, not closed). Afterwards the session has no current tab |
 | `close_session` | — | `closed` (number of tabs) | Closes every tab of the session, releases borrowed tabs, removes the group |
@@ -190,7 +191,7 @@ Format of `tree`:
 
 - The maximum wait time is taken from the request's `timeoutMs`. If it is exceeded, return `TIMEOUT`.
 - With `selector`, matching no element yet means waiting rather than an error, so `wait_for` does not return `ELEMENT_NOT_FOUND`:
-  - `visible`: done when the selector matches a visible element (same hidden/visible criteria as the snapshot, §8.3);
+  - `visible`: done when the selector matches a rendered element: a non-empty box, not `display:none` or `visibility:hidden`. Unlike the snapshot (§8.3), `aria-hidden` does not count, since a modal often marks the page behind it `aria-hidden` while it stays on screen;
   - `hidden`: done when no element matches any more, or the matching element is hidden. A ref that no longer resolves to an element (removed, or the page moved to another document) also counts as hidden and does not return `STALE_REF`.
 - Whenever a CSS selector matches more than one element, return `AMBIGUOUS_SELECTOR` immediately, in both states.
 
@@ -202,6 +203,7 @@ Format of `tree`:
 
 - If `path` is not passed, the file is written to `~/.browser-bridge/artifacts/<session>-<timestamp>.<ext>`.
 - A `path` passed by the caller must be an absolute path, because the daemon's working directory is not the agent's. The path is used verbatim: parent directories are created automatically, and an existing file is overwritten.
+- `width` and `height` are the image's pixel size, which the daemon reads from the image header (device pixels, so twice the CSS size on a 200% display).
 
 ### 5.6 Network
 
@@ -237,7 +239,7 @@ Format of `tree`:
 - One session corresponds to one task and one tab group.
 - Each session has one **current tab**. Every single-tab action runs on that tab; if there is none, return `NO_CURRENT_TAB`.
 - Commands within the same session run sequentially through a queue in the daemon. Different sessions run in parallel.
-- The state in the extension consists of: `{session → groupId, tabIds, currentTabId, borrowedTabIds}` and the ref counter of each tab. This state is stored in `chrome.storage.session`.
+- The state in the extension consists of: `{session → groupId, tabIds, currentTabId, borrowedTabIds}`, stored in `chrome.storage.session`, and the ref counter of each tab (§6.2).
 - When the user closes a tab that belongs to a session, that tab is removed from the state (by listening to `tabs.onRemoved`). If it was the current tab, the session has no current tab.
 - **Cleanup commands always work:** `list_tabs`, `close_tab`, `close_session` are never blocked by `DIALOG_OPEN`, `DETACHED_BY_USER` or `BLOCKED_HOST`, so the agent can always get out of a stuck tab.
 - **MCP:** each `bridge mcp` process generates a session named `mcp-<6 random characters>` at startup. MCP tools have no `session` parameter, so small models do not have to deal with it.
@@ -245,7 +247,7 @@ Format of `tree`:
 ### 6.2 Refs `@e<n>`
 
 - **A ref number is never reused during the lifetime of a tab:**
-  - Each tab has an increment-only counter, stored in `chrome.storage.session` and preserved across navigations.
+  - Each tab has an increment-only counter, preserved across navigations. It is stored in `chrome.storage.local`, not `session`: an agent can hold refs across an extension reload or update, which empties `session` and starts a fresh page agent. Counters of tabs that no longer exist are dropped when the service worker starts.
   - Within the same document, an element that already has a ref keeps that ref in later snapshots. The page agent keeps a `WeakMap<Element, ref>`.
   - A new element gets the next number from the counter.
 - The `ref → WeakRef<Element>` lookup table lives in the page's `bridge` **isolated world**, so the page's own scripts cannot read or modify it.
@@ -279,6 +281,7 @@ Format of `tree`:
 - The extension checks the current tab's host before every command, **except** commands used to leave a page (`navigate`, `find_tab`, `go_back`, `go_forward`) and cleanup commands (§6.1). If these commands were blocked too, the agent would be stuck on that tab forever.
 - After `navigate`, `go_back`, `go_forward`, `reload` finish loading, the extension checks the final URL again to catch pages that redirect on their own.
 - `find_tab` does not select a tab on a blocked host, even when borrowing with `active:true`.
+- Network capture never records a request to a blocked host, even one an allowed page makes or one that gets there through a redirect.
 - A violation returns `BLOCKED_HOST`, without the `url` or `title` of the blocked page.
 - `blockedHosts` only blocks entering pages and operating on pages. `cdp` can still read the cookies of every host, including blocked hosts (`Network.getAllCookies`, `Network.getCookies`, `Storage.getCookies`). This is an accepted risk: the bridge only listens on `127.0.0.1`, and per the decision above not to use a token, any process running under your user can already control the browser.
 
@@ -309,30 +312,34 @@ Format of `tree`:
 
 ### 8.3 Page agent
 
-- **Injection:** an IIFE bundle, put into the page with `Page.createIsolatedWorld {frameId: <main frame>, worldName: "bridge"}` followed by `Runtime.evaluate`.
+- **Injection:** an IIFE bundle (WXT unlisted script `page-agent.js`), which the service worker reads from the extension package and puts into the page with `Page.createIsolatedWorld {frameId: <main frame>, worldName: "bridge"}` followed by `Runtime.evaluate`.
   - Injected once per document (marked by `globalThis.__bridge`).
-  - When the context is destroyed, it is recreated on the next command.
-- **Page agent API:**
-  - `snapshot(opts)`
-  - `resolve(selector) → {ok, rect, objectId?}` or an error
-  - `checkActionable(selector)`
-  - `waitFor(cond)`
+  - The service worker remembers each tab's world; `Runtime.executionContextDestroyed`/`executionContextsCleared` and a main-frame `Page.frameNavigated` forget it, and the next command makes a new one. A command that loses the race with a navigation retries once in the new document.
+  - The world is addressed by its `uniqueContextId` (from `Runtime.executionContextCreated`), not its `contextId`: context ids are reused across renderer processes, so a stale one could name a context of the next site.
+  - Making a world re-checks the frame's URL against `blockedHosts` (§7.1): the router checked the tab before the command, but a navigation may have committed since.
+- **Page agent API:** `globalThis.__bridge.call(method, args)` answers `{value}` or `{error: {code, message, hint}}`, never throws. Methods: `snapshot`, `clickPoint` (scroll, actionability, the point to click), `prepareFill`, `hasText`, `select`, `focus`, `scroll`, `clip` (an element's box for `screenshot`), `fileInput`, `check` (one poll of `wait_for`). `__bridge.take()` hands the element `fileInput` checked to CDP as a remote object.
 - **Snapshot:**
-  - Walks the DOM, including open shadow roots.
-  - Skips elements that are `display:none`, `visibility:hidden`, `aria-hidden`, or have zero size.
-  - Role and accessible name come from `dom-accessibility-api`.
+  - Walks the flat tree: open shadow roots, and slots by their assigned nodes.
+  - Skips elements that are `display:none`, `aria-hidden`, or have no box at all (closed `<details>`, `content-visibility:hidden`). An element that is `visibility:hidden` or zero-sized gets no line of its own, but its children are still walked, since they can be visible.
+  - Role and accessible name come from `dom-accessibility-api`. Input types it leaves without a role get one: `password` and the date/time types are `textbox`, `file` is `fileinput` (it is not a button to click: that would open the native file chooser).
+  - Only elements that matter to an agent get a line: interactive ones (with a ref) and structural roles (headings, lists, landmarks, tables, dialogs …). Generic containers are left out and their content moves up a level. Text runs inside a block become one `- text` line.
+  - An element is interactive when its role is (button, link, textbox …), when it is a native control, has `tabindex >= 0`, `onclick`, is contenteditable, or sets `cursor: pointer` itself (sites build buttons from divs). The last ones have no ARIA role and are shown as `clickable`.
+  - A button, link, heading or cell with nothing interactive inside is one line, its text as its name. A `<select>` lists its options below it.
+  - A `<label>` whose control is visible is not repeated: the control's line carries its text. When the control is hidden (a checkbox styled through its label), the label stands in for it: `- checkbox "Notify me" [checked] @e9`. The ref clicks the label, and `fill`, `select` and `upload` given the label's ref act on its control (a file input hidden behind a styled "Upload" label is common).
   - State includes: `checked`, `disabled`, `expanded`, `selected`, `level`, `value`. For password fields specifically, `value` is never included.
+  - The walk stops once the output is surely longer than `maxChars`, so a huge page costs no more than the part returned.
 
 ### 8.4 Real input via CDP
 
 | Action | How it works |
 |---|---|
-| `click` | `scrollIntoView({block:"center"})` → check the element: still in the DOM, has size, not disabled, `elementFromPoint(center)` is the element itself or its descendant. If not, return `ELEMENT_NOT_INTERACTABLE` with a description of the element covering it → `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) at the element's center |
-| `fill` | focus → select all content (`select()` for input/textarea, the Selection API for contenteditable) → `Input.insertText(value)`, or press Delete when `value` is empty. For contenteditable, read `textContent` back after inserting; if it differs, select all and insert again once; if it still differs, return `INTERNAL` |
+| `click` | `scrollIntoView({block:"center"})` → check the element: still in the DOM, has size, not disabled, `elementFromPoint(center)` is the element itself or its descendant. If not, return `ELEMENT_NOT_INTERACTABLE` with a description of the element covering it → `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) at the element's center. A file input, or a label for one, is refused with a hint to use `upload`: the click would open the native file chooser in front of the user. The `text` returned is the element's text, never a field's value |
+| `fill` | focus → select all content (`select()` for input/textarea, the Selection API for contenteditable) → `Input.insertText(value)`, or press Delete when `value` is empty. For contenteditable, read the text back after inserting, ignoring whitespace (editors turn line breaks into paragraphs); if it differs, select all and insert again once; if it still differs, return `INTERNAL`. Inputs that take no typing (`date`, `time`, `color`, `range` …) get the value set directly, then `input` and `change` |
 | `select` | Set `value` on the `<select>` from the isolated world → fire the `input` and `change` events (bubbles) |
-| `press_key` | `Input.dispatchKeyEvent` (`keyDown`, `char` if it is a printable character, `keyUp`). Key combinations are split on the `+` sign |
+| `press_key` | `Input.dispatchKeyEvent`: modifiers down, the key (`keyDown` with `text` when it types something, which also fires `keypress`; `rawKeyDown` otherwise), key up, modifiers up. Key combinations are split on the `+` sign. `Enter` types `
+`, so it submits forms; with Control, Alt or Meta held a key types nothing |
 | `scroll` | `scrollIntoView` with `selector`, or `window.scrollBy` |
-| `upload` | Get the element's `objectId` → `DOM.describeNode` → `backendNodeId` → `DOM.setFileInputFiles`. The daemon checks that every path in `files` exists before sending down |
+| `upload` | Get the element's `objectId` from the isolated world → `DOM.setFileInputFiles {objectId, files}`. The daemon checks that every path in `files` exists before sending down |
 
 ### 8.5 The remaining actions
 
@@ -348,6 +355,7 @@ Format of `tree`:
 
 - Listen to `Page.javascriptDialogOpening` and store the open dialog per tab.
 - If a dialog pops up **while** a `click` or `press_key` is running, the action stops waiting for CDP to return (CDP would hang until the dialog is closed) and immediately returns `ok` with `dialog: {type, message}`.
+- `fill` and `select` can make the page open a dialog too (from a focus, input or change handler), but their results have no `dialog` field: they return `DIALOG_OPEN` with the message in the hint, instead of hanging until `TIMEOUT`.
 - While a tab has an open dialog, every command other than `handle_dialog` and cleanup commands (§6.1) returns `DIALOG_OPEN` with `{type, message}` in the hint.
 - `handle_dialog` when there is no dialog returns `NO_DIALOG`.
 
@@ -392,7 +400,7 @@ artifacts\
 
 ```json
 {
-  "running": true, "version": "0.1.0", "protocolVersion": 1, "port": 9876, "pid": 4120, "uptimeSeconds": 120,
+  "running": true, "version": "0.1.0", "protocolVersion": 2, "port": 9876, "pid": 4120, "uptimeSeconds": 120,
   "extension": { "connected": true, "id": "...", "version": "0.1.0", "browser": "chrome" },
   "sessions": 2
 }
@@ -401,7 +409,7 @@ artifacts\
 ### 9.4 Version
 
 - The daemon and extension share one version number, because they are released together from one repo.
-- `protocolVersion` is an integer. When the two sides do not match at handshake:
+- `protocolVersion` is an integer, currently 2 (version 2 added `actions` to `hello` and the `activate_tab` action). When the two sides do not match at handshake:
   - the daemon closes the WebSocket with code 4400;
   - `/status` shows both versions;
   - every command returns `VERSION_MISMATCH` with a hint stating clearly which side is older.
@@ -411,7 +419,7 @@ artifacts\
 Every frame is JSON text with a `type` field.
 
 ```text
-ext → daemon   {type:"hello", protocolVersion, extensionVersion, extensionId, browser}
+ext → daemon   {type:"hello", protocolVersion, extensionVersion, extensionId, browser, actions}   actions: the action names this extension implements (§4 GET /tools)
 daemon → ext   {type:"welcome", protocolVersion, daemonVersion, blockedHosts}   the extension uses blockedHosts to check commands (§7.1)
 daemon → ext   {type:"request", id, session, action, args, deadline}     deadline: epoch ms
 ext → daemon   {type:"response", id, ok, data | error}

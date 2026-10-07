@@ -103,6 +103,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType '
 
 A background tab with `example.com` opens in a tab group named "demo", with Chrome's yellow "debugging" bar. Click the Browser Bridge icon to open the side panel.
 
+Read the page the way an agent sees it:
+
+```powershell
+(Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType 'application/json' `
+  -Body '{"action":"snapshot","session":"demo"}').data.tree
+```
+
 Close the session and its tabs when you are done:
 
 ```powershell
@@ -121,31 +128,60 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:9876/command -ContentType '
 | Stop or restart the daemon | `bridge stop`, `bridge restart` |
 | Run the daemon in the foreground | `bridge serve` |
 | Print the version | `bridge version` |
+| Show the commands | `bridge help` |
 | Update | Run the install command again, then click **Reload** on Browser Bridge in `chrome://extensions` |
 
 ### Actions
 
+Every action works on the session's **current tab**: the tab `navigate` opened or `find_tab` picked.
+
+**Tabs and navigation**
+
 | Action | Description |
 |---|---|
-| `navigate` | Open a URL in the session's current tab, or in a new background tab (`newTab: true`). Waits for the load event. |
-| `find_tab` | Make an existing tab the session's current tab: search the session's tabs by host, or borrow the tab you are looking at (`active: true`) |
+| `navigate` | Open a URL in the current tab, or in a new background tab (`newTab: true`). Waits for the load event. |
+| `find_tab` | Make an existing tab the current tab: search the session's tabs by host, or borrow the tab you are looking at (`active: true`) |
+| `activate_tab` | Bring the current tab to the front and focus its window. Chrome holds back some things, such as starting a video, until a tab has been visible. |
 | `list_tabs` | List the session's tabs |
 | `close_tab` | Close the current tab. A borrowed tab is only released, never closed. |
 | `close_session` | Close every tab of the session, release borrowed tabs and remove the tab group |
 | `go_back`, `go_forward` | Move through the current tab's history |
 | `reload` | Reload the current tab |
 
-`GET /tools` returns each action with its argument schema.
+**Reading and acting on the page**
+
+| Action | Description |
+|---|---|
+| `snapshot` | Read the page as an accessibility tree. Interactive elements get refs such as `@e12`. |
+| `screenshot` | Save the viewport, the full page (`fullPage: true`) or one element (`selector`) as PNG or JPEG. Returns the file path. |
+| `click` | Click an element with a real mouse event. Fails with `ELEMENT_NOT_INTERACTABLE` when something covers it. |
+| `fill` | Replace the text of an input, textarea or rich text editor |
+| `select` | Pick an option of a `<select>` by `value` or `label` |
+| `press_key` | Press a key or combination (`Enter`, `k`, `Control+A`), optionally after focusing `selector` |
+| `scroll` | Scroll an element into view, or scroll the page by `direction` and `amount` |
+| `upload` | Set the files of an `<input type=file>` (absolute paths) |
+| `wait_for` | Wait for an element to be `visible` or `hidden`, for a text, a URL substring or the load event |
+| `handle_dialog` | Accept or dismiss an `alert`, `confirm` or `prompt`. While one is open, other actions return `DIALOG_OPEN`. |
+| `network_start`, `network_requests`, `network_request_detail`, `network_stop` | Record the current tab's requests and read their headers and bodies |
+| `evaluate` | Run JavaScript in the page and return the result. Top-level `await` works, and the call counts as a user gesture, so `video.play()` is allowed. |
+| `cdp` | Send a raw Chrome DevTools Protocol command to the current tab (`Browser.*` and `Target.*` are blocked) |
+
+`selector` is a ref from the latest `snapshot` (`@e12`) or a CSS selector that matches exactly one element. A ref keeps pointing at the same element across snapshots and fails with `STALE_REF` once that element is gone, never pointing at another one.
+
+`GET /tools` returns each action with its argument schema and `available`: whether the connected extension can run it. Every action is `available: false` while no extension is connected.
+
+For example, to open a video and start it:
+
+```powershell
+$c = @{ Method = 'Post'; Uri = 'http://127.0.0.1:9876/command'; ContentType = 'application/json' }
+Invoke-RestMethod @c -Body '{"action":"navigate","args":{"url":"https://www.youtube.com/watch?v=aqz-KE-bpKQ"},"session":"demo"}'
+Invoke-RestMethod @c -Body '{"action":"activate_tab","session":"demo"}'
+Invoke-RestMethod @c -Body '{"action":"click","args":{"selector":"button.ytp-play-button"},"session":"demo"}'
+```
 
 ### Roadmap
 
-`GET /tools` also lists actions that are defined in the protocol but not implemented by the extension yet. Calling one returns `INTERNAL: <action> is not implemented in this extension version`. They are:
-
-- Page reading and interaction: `snapshot`, `click`, `fill`, `select`, `press_key`, `scroll`, `upload`, `wait_for`, `handle_dialog`
-- Capture and inspection: `screenshot`, `network_start`, `network_requests`, `network_request_detail`, `network_stop`
-- Low level: `evaluate`, `cdp`
-
-Also planned: `bridge call`, `bridge mcp` and a `SKILL.md` for agents. See the [design spec](docs/superpowers/specs/2026-10-06-browser-bridge-design.md) for the full plan.
+Planned: `bridge call`, `bridge mcp`, `bridge logs` and a `SKILL.md` for agents. See the [design spec](docs/superpowers/specs/2026-10-06-browser-bridge-design.md) for the full plan.
 
 ## HTTP API
 
@@ -154,7 +190,7 @@ The daemon listens on `127.0.0.1:9876`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/command` | Run an action |
-| `GET` | `/tools` | List actions and their JSON Schemas |
+| `GET` | `/tools` | List actions, their JSON Schemas and whether the connected extension can run them |
 | `GET` | `/status` | Daemon and extension status |
 | `POST` | `/shutdown` | Stop the daemon |
 | `GET` | `/ws` | WebSocket endpoint, for the extension only |
@@ -220,7 +256,7 @@ The installer added it to your user `PATH`. Open a new terminal window.
 
 **The daemon is running but the extension is not connected**
 
-Make sure the extension is loaded from `%USERPROFILE%\.browser-bridge\extension` (or from your own build). After an update, click **Reload** on Browser Bridge in `chrome://extensions`. The extension ID is pinned by `extension/manifest-key.txt`; if you build with a different key, add the new ID to `extensionIds`.
+Make sure the extension is loaded from `%USERPROFILE%\.browser-bridge\extension` (or from your own build). After an update, click **Reload** on Browser Bridge in `chrome://extensions`: until then every command returns `VERSION_MISMATCH` when the update changed the protocol between daemon and extension. The extension ID is pinned by `extension/manifest-key.txt`; if you build with a different key, add the new ID to `extensionIds`.
 
 ## Development
 
@@ -254,7 +290,8 @@ The [`release.yml`](.github/workflows/release.yml) workflow checks the versions,
 daemon/       Go: bridge binary (cmd/bridge), schema generator (cmd/schemagen),
               internal/{protocol,server,session,home,fakeext}
 schema/       JSON Schema generated from Go (committed)
-extension/    WXT + React: src/entrypoints, src/background, src/shared, src/generated
+extension/    WXT + React: src/entrypoints, src/background (service worker),
+              src/page-agent (runs inside pages), src/shared, src/generated
 e2e/          Playwright tests running the real extension against a separate daemon
 testpage/     Static HTML pages for tests
 install/      install.ps1, build-dist.ps1, check-version.ps1, test-install.ps1
