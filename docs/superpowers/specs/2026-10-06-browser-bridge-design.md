@@ -406,8 +406,8 @@ artifacts\
 
 ```json
 {
-  "running": true, "version": "0.2.0", "protocolVersion": 2, "port": 9876, "pid": 4120, "uptimeSeconds": 120,
-  "extension": { "connected": true, "id": "...", "version": "0.2.0", "browser": "chrome" },
+  "running": true, "version": "0.3.0", "protocolVersion": 2, "port": 9876, "pid": 4120, "uptimeSeconds": 120,
+  "extension": { "connected": true, "id": "...", "version": "0.3.0", "browser": "chrome" },
   "sessions": 2
 }
 ```

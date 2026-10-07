@@ -4,7 +4,7 @@ declare const chrome: any;
 
 test('the extension connects and identifies itself', async ({ bridge }) => {
   const st = await bridge.status();
-  expect(st.extension).toMatchObject({ connected: true, id: 'nfjidhefdgblbbfhnmbcogkbphipngif', version: '0.2.0', browser: 'chrome' });
+  expect(st.extension).toMatchObject({ connected: true, id: 'nfjidhefdgblbbfhnmbcogkbphipngif', version: '0.3.0', browser: 'chrome' });
 });
 
 test('navigate opens one background tab per session, grouped under the session name', async ({ bridge, session, site, sw }) => {

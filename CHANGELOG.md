@@ -4,6 +4,10 @@ All notable changes to browser-bridge. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
+To update, run the install command again: it also adds the skill to Claude Code and Codex. Then click **Reload** on Browser Bridge in `chrome://extensions` to get the snapshot fixes. The protocol did not change, so the 0.2.0 extension keeps working until you do.
+
 ### Added
 
 - `bridge call <action> --session <name> [key=value ...]` runs one action from any shell and prints the response envelope. Arguments are `key=value` pairs, converted to booleans, numbers and lists from the action's schema, so no JSON quoting is needed. `key:=<json>`, `--json` and `--json-file` (`-` for stdin) pass raw JSON. Exit code 0 when ok, 1 when the action failed, 2 when the daemon cannot be reached.
@@ -60,6 +64,7 @@ First release.
 - The Chrome and Edge extension: connects to the daemon, keeps each session in its own tab group, and runs the tab actions `navigate`, `find_tab`, `list_tabs`, `close_tab`, `close_session`, `go_back`, `go_forward` and `reload`. Its side panel shows the connection, the sessions and recent commands.
 - The one-line Windows installer, and releases built and tested by GitHub Actions.
 
-[Unreleased]: https://github.com/phantranthelinh/browser-bridge/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/phantranthelinh/browser-bridge/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/phantranthelinh/browser-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/phantranthelinh/browser-bridge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/phantranthelinh/browser-bridge/releases/tag/v0.1.0

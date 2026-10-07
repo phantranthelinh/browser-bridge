@@ -7,7 +7,7 @@ package protocol
 import "encoding/json"
 
 const (
-	Version         = "0.2.0"
+	Version         = "0.3.0"
 	ProtocolVersion = 2
 	// DefaultExtensionID follows from the public key in extension/manifest-key.txt;
 	// TestDefaultExtensionIDMatchesManifestKey fails if the two drift apart.
