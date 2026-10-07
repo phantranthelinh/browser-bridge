@@ -134,3 +134,21 @@ func TestServeStopsOnShutdownRequest(t *testing.T) {
 	}
 }
 
+func TestHelpIsOutputNotAnError(t *testing.T) {
+	for _, arg := range []string{"help", "-h", "--help"} {
+		var stdout, stderr bytes.Buffer
+		if code := run(context.Background(), []string{arg}, &stdout, &stderr); code != 0 {
+			t.Errorf("%s: exit code %d", arg, code)
+		}
+		if !strings.Contains(stdout.String(), "usage: bridge") || stderr.Len() != 0 {
+			t.Errorf("%s: usage must go to stdout; stdout=%q stderr=%q", arg, stdout.String(), stderr.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"bogus"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "usage: bridge") {
+		t.Errorf("an unknown command is still an error: exit %d, stderr %q", code, stderr.String())
+	}
+	if code := run(context.Background(), nil, &stdout, &stderr); code != 2 {
+		t.Errorf("no command: exit %d", code)
+	}
+}

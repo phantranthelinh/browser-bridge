@@ -27,32 +27,44 @@ const usage = `usage: bridge <command>
   status                       print the daemon status as JSON (exit 1 when not running)
   serve [--addr host:port]     run the daemon in the foreground
   version                      print the version
+  help                         print this help
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	args := os.Args[2:]
-	switch os.Args[1] {
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
+}
+
+// run dispatches one subcommand and returns the process exit code.
+func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+	if len(argv) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	args := argv[1:]
+	switch argv[0] {
 	case "start":
-		os.Exit(startCmd(args, os.Stdout, os.Stderr))
+		return startCmd(args, stdout, stderr)
 	case "stop":
-		os.Exit(stopCmd(args, os.Stdout, os.Stderr))
+		return stopCmd(args, stdout, stderr)
 	case "restart":
-		os.Exit(restartCmd(args, os.Stdout, os.Stderr))
+		return restartCmd(args, stdout, stderr)
 	case "status":
-		os.Exit(statusCmd(args, os.Stdout, os.Stderr))
+		return statusCmd(args, stdout, stderr)
 	case "serve":
-		os.Exit(serve(ctx, args, os.Stderr))
+		return serve(ctx, args, stderr)
 	case "version":
-		fmt.Println(protocol.Version)
+		fmt.Fprintln(stdout, protocol.Version)
+		return 0
+	case "help", "-h", "--help", "-help":
+		// Asked for, so it is the output rather than an error.
+		fmt.Fprint(stdout, usage)
+		return 0
 	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 }
 
