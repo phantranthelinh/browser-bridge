@@ -26,6 +26,13 @@ Set-Content -LiteralPath (Join-Path $bridgeHome 'config.json') -Value "{`"addr`"
 # The bridge commands this script runs itself (status, stop) must find the test daemon too.
 $savedHome = $env:BRIDGE_HOME
 $env:BRIDGE_HOME = $bridgeHome
+# The skill goes to a stand-in for ~/.claude, never the real one; Codex counts as not installed.
+$savedClaude, $savedCodex = $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME
+$claudeHome = Join-Path $bridgeHome 'claude'
+New-Item -ItemType Directory -Path $claudeHome | Out-Null
+$env:CLAUDE_CONFIG_DIR = $claudeHome
+$env:CODEX_HOME = Join-Path $bridgeHome 'no-codex'
+$skill = Join-Path $claudeHome 'skills\browser-bridge\SKILL.md'
 
 # Returns what the installer printed, after showing it.
 function Invoke-Installer([string]$Arguments) {
@@ -68,16 +75,20 @@ try {
     Assert ($version -eq $manifest.version) "bridge $version matches the extension $($manifest.version)"
     $first = Get-DaemonPid
     Assert ($first -gt 0) "the daemon runs on $addr (pid $first)"
+    Assert (Test-Path -LiteralPath $skill) 'the skill is added to Claude Code'
+    Assert (-not (Test-Path -LiteralPath $env:CODEX_HOME)) 'nothing is written for Codex, which is not installed'
 
     Write-Host '== reinstall while the daemon runs'
-    Invoke-Installer '-NoPath -NoWait' | Out-Null
+    $output = Invoke-Installer '-NoPath -NoWait'
     $second = Get-DaemonPid
     Assert ($second -gt 0 -and $second -ne $first) "the daemon was replaced (pid $first, then $second)"
+    Assert ($output -match 'click Reload' -and $output -notmatch 'Load the extension in Chrome') 'an update asks for Reload, not for loading the extension'
 
     Write-Host '== uninstall keeps files bridge did not create'
     Set-Content -LiteralPath (Join-Path $bridgeHome 'notes.txt') -Value 'not ours'
     Invoke-Installer '-Uninstall' | Out-Null
     Assert (-not (Test-DaemonUp)) 'the daemon is stopped'
+    Assert (-not (Test-Path -LiteralPath $skill)) 'the skill is removed'
     foreach ($name in 'bin', 'extension', 'logs', 'config.json', 'daemon.addr') {
         Assert (-not (Test-Path -LiteralPath (Join-Path $bridgeHome $name))) "$name is removed"
     }
@@ -85,6 +96,7 @@ try {
 
     Write-Host '== uninstall removes the home folder once it is empty'
     Remove-Item -LiteralPath (Join-Path $bridgeHome 'notes.txt')
+    Remove-Item -LiteralPath $claudeHome -Recurse
     Invoke-Installer '-Uninstall' | Out-Null
     Assert (-not (Test-Path -LiteralPath $bridgeHome)) 'the home folder is removed'
 } finally {
@@ -96,5 +108,6 @@ try {
         Write-Warning "cleanup of $bridgeHome failed: $_"
     }
     $env:BRIDGE_HOME = $savedHome
+    $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME = $savedClaude, $savedCodex
 }
 Write-Host "All installer tests passed ($Shell)." -ForegroundColor Green

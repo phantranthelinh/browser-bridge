@@ -17,6 +17,7 @@ param(
     [switch]$NoStart,
     [switch]$NoPath,
     [switch]$NoWait,
+    [switch]$NoSkill,
     [switch]$Uninstall
 )
 
@@ -52,6 +53,7 @@ Options
   -NoStart     install, but do not start the daemon
   -NoPath      do not add bridge to PATH
   -NoWait      do not wait for the extension to connect
+  -NoSkill     do not add the browser-bridge skill to Claude Code and Codex
   -Uninstall   stop the daemon and remove what the installer created
 
 Environment
@@ -132,6 +134,13 @@ function Install-Extension {
     }
     Move-Item -LiteralPath $staging -Destination $ExtDir
     Write-Ok "Extension files in $ExtDir"
+}
+
+# Gives Claude Code and Codex, when installed, the skill that teaches them bridge call.
+function Install-Skill {
+    Write-Step 'Adding the browser-bridge skill to the agents on this machine...'
+    & $BinPath install-skill | Out-Host
+    if ($LASTEXITCODE -ne 0) { Write-Warn "bridge install-skill exited with $LASTEXITCODE" }
 }
 
 function Test-SamePath([string]$A, [string]$B) { return $A.TrimEnd('\') -ieq $B.TrimEnd('\') }
@@ -234,17 +243,36 @@ function Write-ReloadExtension($Status) {
     Write-Warn "The loaded extension speaks protocol $(Get-Prop $Status.extension 'protocolVersion'), the daemon $($Status.protocolVersion): click Reload on Browser Bridge in chrome://extensions."
 }
 
-function Connect-Extension([switch]$Wait) {
+# An update replaces the files of an extension Chrome already loaded from $ExtDir. Chrome keeps
+# running the old build until Reload, and that build reconnects by itself within 30 seconds, so
+# nothing being connected right after the daemon restarts is no reason for the Load unpacked steps.
+function Show-ReloadSteps {
+    Write-Host ''
+    Write-Host 'The extension files were updated: click Reload on Browser Bridge in chrome://extensions (Edge: edge://extensions).' -ForegroundColor Cyan
+    Write-Host "  Not loaded yet? Turn on Developer mode, click Load unpacked and choose $ExtDir"
+    Write-Host ''
+}
+
+function Write-Connected($Status) {
+    Write-Ok 'The extension is connected.'
+    $running = Get-Prop $Status.extension 'version'
+    if ($running -and $running -ne $Status.version) {
+        Write-Warn "Chrome still runs version $running of it: click Reload on Browser Bridge in chrome://extensions to run $($Status.version)."
+    }
+}
+
+function Connect-Extension([switch]$Wait, [switch]$Updated) {
     $st = Get-DaemonStatus
     if (-not $st) { return }
     if (Get-Prop $st.extension 'connected') {
-        Write-Ok 'The extension is connected.'
-        Write-Host '  After an update, click Reload on Browser Bridge in chrome://extensions.'
+        Write-Connected $st
         return
     }
     if (Test-OutdatedExtension $st) {
         Write-ReloadExtension $st
         if (-not $Wait) { return }
+    } elseif ($Updated) {
+        Show-ReloadSteps
     } else {
         # Shown whether or not we wait: with -NoWait this is the only place the user learns the steps.
         Show-LoadUnpackedSteps
@@ -261,7 +289,7 @@ function Connect-Extension([switch]$Wait) {
         $st = Get-DaemonStatus
         if (-not $st) { continue }
         if (Get-Prop $st.extension 'connected') {
-            Write-Ok 'The extension is connected.'
+            Write-Connected $st
             return
         }
         # An installed extension reconnects on its own within 30s of the daemon restarting.
@@ -279,6 +307,8 @@ function Write-Summary {
     Write-Host "  Extension folder (Load unpacked once): $ExtDir"
     Write-Host '  bridge status   shows the daemon and the extension'
     Write-Host '  bridge start    starts the daemon again after a reboot'
+    Write-Host '  bridge call     runs one action, e.g. bridge call navigate --session demo url=https://example.com'
+    Write-Host '  bridge mcp      serves the actions to MCP clients (bridge install-skill shows the setup)'
     if ($NoPath) { Write-Host "  bridge is not on PATH (-NoPath): run $BinPath" }
     Write-Host '  Any program running as you can drive this browser through bridge.' -ForegroundColor Yellow
 }
@@ -288,10 +318,12 @@ function Install-Bridge {
     New-Item -ItemType Directory -Force -Path $BridgeHome | Out-Null
     Stop-Daemon
     Install-Binary
+    $updated = Test-Path -LiteralPath (Join-Path $ExtDir 'manifest.json')
     Install-Extension
     if (-not $NoPath) { Add-ToPath }
+    if (-not $NoSkill) { Install-Skill }
     if (-not $NoStart) {
-        if (Start-Daemon) { Connect-Extension -Wait:(-not $NoWait) }
+        if (Start-Daemon) { Connect-Extension -Wait:(-not $NoWait) -Updated:$updated }
     }
     Write-Summary
 }
@@ -299,6 +331,7 @@ function Install-Bridge {
 function Uninstall-Bridge {
     Write-Step "Uninstalling browser-bridge from $BridgeHome"
     Stop-Daemon
+    if (Test-Path -LiteralPath $BinPath) { & $BinPath install-skill --remove | Out-Host }
     Remove-FromPath
     # Only what bridge creates: BRIDGE_HOME may point at a folder that also holds other files.
     foreach ($name in 'bin', 'extension', 'extension.new', 'extension.download.zip', 'logs', 'artifacts', 'config.json', 'daemon.pid', 'daemon.addr') {
