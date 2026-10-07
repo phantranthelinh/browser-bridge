@@ -35,6 +35,10 @@ test.describe('page actions', () => {
     const tree: string = snap.tree;
     expect(tree).toContain('- heading "Actions page" [level=1]');
     expect(tree).toContain('- text "Some bold text in a paragraph."');
+    // the spaces at the edges of inline elements separate words; where there are none, nothing is added
+    expect(tree).toContain('- text "Runs of styled words,joined"');
+    // a link wrapped around a link that says the same is one line
+    expect(tree).toMatch(/- link "Nested menu" @e\d+\n(?! +- link "Nested menu")/);
     expect(tree).toMatch(/- textbox "Name" @e\d+/);
     expect(tree).toMatch(/- combobox "Color" \[value="Red"\] @e\d+/);
     expect(tree).toContain('- option "Green"');

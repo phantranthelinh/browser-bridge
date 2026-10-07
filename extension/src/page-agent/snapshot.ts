@@ -32,6 +32,8 @@ interface Line {
   children: Item[];
 }
 
+/** Text keeps one space at either end where the page had whitespace, so that inline runs such as
+ * `<span>Lofi </span><b>Chill</b>` join as words; render trims it. */
 type Item = { text: string } | Line;
 
 interface Visited {
@@ -103,14 +105,14 @@ function render(items: Item[], depth: number, out: string[]): void {
   const pad = '  '.repeat(depth);
   for (const it of items) {
     if ('text' in it) {
-      out.push(`${pad}- text "${esc(cut(it.text))}"`);
+      out.push(`${pad}- text "${esc(cut(it.text.trim()))}"`);
       continue;
     }
     let name = it.name;
     let children = it.children;
     // "- listitem" over a lone "- text" line reads better as one line.
     if (!name && children.length === 1 && 'text' in children[0]!) {
-      name = children[0].text;
+      name = children[0].text.trim();
       children = [];
     }
     let head = `${pad}- ${it.role}`;
@@ -138,9 +140,9 @@ class Walker {
     const items: Item[] = [];
     let run = '';
     const flush = () => {
-      const text = collapse(run);
+      const text = run.replace(/\s+/g, ' ');
       run = '';
-      if (text) this.add(items, { text });
+      if (text.trim()) this.add(items, { text });
     };
     for (const child of flatChildren(el)) {
       if (this.full) break;
@@ -217,6 +219,7 @@ class Walker {
     this.add(items, line);
     if (tag === 'select') line.children = options(el as HTMLSelectElement);
     else if (!leaf) line.children = this.children(el, pointer, true);
+    if (interactive) absorbTwin(line);
     return { items, inline: null };
   }
 
@@ -244,6 +247,19 @@ class Walker {
     this.add(items, { role: 'img', name, states: [], children: [] });
     return { items, inline: null };
   }
+}
+
+/**
+ * Sites nest a control in another of the same kind that says the same thing: YouTube wraps each
+ * menu link in a second link. One line, with the outer ref, says it once.
+ */
+function absorbTwin(line: Line): void {
+  const only = line.children.length === 1 ? line.children[0]! : undefined;
+  if (!only || 'text' in only || only.role !== line.role || only.ref === undefined) return;
+  if (line.name && only.name && line.name !== only.name) return;
+  line.name ||= only.name;
+  line.states = [...new Set([...line.states, ...only.states])];
+  line.children = only.children;
 }
 
 function* flatChildren(el: Element): Iterable<Node> {
