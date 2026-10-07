@@ -27,11 +27,14 @@ Set-Content -LiteralPath (Join-Path $bridgeHome 'config.json') -Value "{`"addr`"
 $savedHome = $env:BRIDGE_HOME
 $env:BRIDGE_HOME = $bridgeHome
 
+# Returns what the installer printed, after showing it.
 function Invoke-Installer([string]$Arguments) {
     $command = "`$env:BRIDGE_INSTALL_BASE = '$Artifacts'; " +
         "iex ('& {' + (Get-Content -Raw -LiteralPath '$installer') + '} $Arguments')"
-    & $Shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $command | Out-Host
+    $output = & $Shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $command | Out-String
+    $output | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "installer $Arguments exited with $LASTEXITCODE" }
+    return $output
 }
 
 function Assert([bool]$Condition, [string]$Message) {
@@ -56,7 +59,8 @@ function Test-DaemonUp {
 
 try {
     Write-Host "== fresh install ($Shell)"
-    Invoke-Installer '-NoPath -NoWait'
+    $output = Invoke-Installer '-NoPath -NoWait'
+    Assert ($output -match 'Load unpacked') 'with -NoWait and no extension connected, the installer still shows how to load it'
     Assert (Test-Path -LiteralPath $bin) 'bridge.exe is installed'
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $bridgeHome 'extension\manifest.json') | ConvertFrom-Json
     Assert ($null -ne $manifest.PSObject.Properties['key']) 'the extension manifest carries its key'
@@ -66,13 +70,13 @@ try {
     Assert ($first -gt 0) "the daemon runs on $addr (pid $first)"
 
     Write-Host '== reinstall while the daemon runs'
-    Invoke-Installer '-NoPath -NoWait'
+    Invoke-Installer '-NoPath -NoWait' | Out-Null
     $second = Get-DaemonPid
     Assert ($second -gt 0 -and $second -ne $first) "the daemon was replaced (pid $first, then $second)"
 
     Write-Host '== uninstall keeps files bridge did not create'
     Set-Content -LiteralPath (Join-Path $bridgeHome 'notes.txt') -Value 'not ours'
-    Invoke-Installer '-Uninstall'
+    Invoke-Installer '-Uninstall' | Out-Null
     Assert (-not (Test-DaemonUp)) 'the daemon is stopped'
     foreach ($name in 'bin', 'extension', 'logs', 'config.json', 'daemon.addr') {
         Assert (-not (Test-Path -LiteralPath (Join-Path $bridgeHome $name))) "$name is removed"
@@ -81,7 +85,7 @@ try {
 
     Write-Host '== uninstall removes the home folder once it is empty'
     Remove-Item -LiteralPath (Join-Path $bridgeHome 'notes.txt')
-    Invoke-Installer '-Uninstall'
+    Invoke-Installer '-Uninstall' | Out-Null
     Assert (-not (Test-Path -LiteralPath $bridgeHome)) 'the home folder is removed'
 } finally {
     # Cleanup must not throw: that would hide the failure that got us here.

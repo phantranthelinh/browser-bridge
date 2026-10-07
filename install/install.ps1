@@ -223,7 +223,18 @@ function Show-LoadUnpackedSteps {
     Write-Host ''
 }
 
-function Connect-Extension {
+# True when an older or newer build of the extension is loaded: it reached the daemon, which
+# turned it away. Reload picks up the files the installer just replaced.
+function Test-OutdatedExtension($Status) {
+    $extensionProtocol = Get-Prop $Status.extension 'protocolVersion'
+    return [bool]($extensionProtocol -and $extensionProtocol -ne $Status.protocolVersion)
+}
+
+function Write-ReloadExtension($Status) {
+    Write-Warn "The loaded extension speaks protocol $(Get-Prop $Status.extension 'protocolVersion'), the daemon $($Status.protocolVersion): click Reload on Browser Bridge in chrome://extensions."
+}
+
+function Connect-Extension([switch]$Wait) {
     $st = Get-DaemonStatus
     if (-not $st) { return }
     if (Get-Prop $st.extension 'connected') {
@@ -231,20 +242,32 @@ function Connect-Extension {
         Write-Host '  After an update, click Reload on Browser Bridge in chrome://extensions.'
         return
     }
-    $extensionProtocol = Get-Prop $st.extension 'protocolVersion'
-    if ($extensionProtocol -and $extensionProtocol -ne $st.protocolVersion) {
-        Write-Warn "The loaded extension speaks protocol $extensionProtocol, the daemon $($st.protocolVersion): click Reload on Browser Bridge in chrome://extensions."
+    if (Test-OutdatedExtension $st) {
+        Write-ReloadExtension $st
+        if (-not $Wait) { return }
+    } else {
+        # Shown whether or not we wait: with -NoWait this is the only place the user learns the steps.
+        Show-LoadUnpackedSteps
+    }
+    if (-not $Wait) {
+        Write-Host '  Check that it connected with: bridge status'
         return
     }
-    Show-LoadUnpackedSteps
     Write-Step "Waiting up to $($WaitSeconds / 60) minutes for the extension to connect (Ctrl+C to skip)..."
+    $warned = Test-OutdatedExtension $st
     $deadline = (Get-Date).AddSeconds($WaitSeconds)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 2
         $st = Get-DaemonStatus
-        if ($st -and (Get-Prop $st.extension 'connected')) {
+        if (-not $st) { continue }
+        if (Get-Prop $st.extension 'connected') {
             Write-Ok 'The extension is connected.'
             return
+        }
+        # An installed extension reconnects on its own within 30s of the daemon restarting.
+        if (-not $warned -and (Test-OutdatedExtension $st)) {
+            Write-ReloadExtension $st
+            $warned = $true
         }
     }
     Write-Warn 'The extension has not connected yet. Do the steps above, then check with: bridge status'
@@ -268,7 +291,7 @@ function Install-Bridge {
     Install-Extension
     if (-not $NoPath) { Add-ToPath }
     if (-not $NoStart) {
-        if ((Start-Daemon) -and -not $NoWait) { Connect-Extension }
+        if (Start-Daemon) { Connect-Extension -Wait:(-not $NoWait) }
     }
     Write-Summary
 }
