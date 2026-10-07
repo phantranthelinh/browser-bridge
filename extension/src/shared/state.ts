@@ -5,11 +5,12 @@
 export const DEFAULT_DAEMON_URL: string = import.meta.env.WXT_DAEMON_URL || 'ws://127.0.0.1:9876/ws';
 
 // chrome.storage.session holds sessions, connection and log, so they survive a service worker
-// restart but not a browser restart. chrome.storage.local holds daemonUrl.
+// restart but not a browser restart. chrome.storage.local holds daemonUrl and refs.
 export const KEYS = {
   sessions: 'sessions',
   connection: 'connection',
   log: 'log',
+  refs: 'refs',
   daemonUrl: 'daemonUrl',
 } as const;
 

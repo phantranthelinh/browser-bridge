@@ -11,6 +11,13 @@ export interface EventWait<T> {
   cancel(): void;
 }
 
+/** Long-lived per-tab state (dialogs, network capture, page agent worlds) follows CDP through this. */
+export interface CdpListener {
+  event?(tabId: number, method: string, params: any): void;
+  /** The tab is no longer attached: closed, cancelled by the user, or released by us. */
+  detached?(tabId: number): void;
+}
+
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** chrome.debugger for tabs: attach once per tab and keep it, send commands, wait for events. */
@@ -18,17 +25,24 @@ export class Cdp {
   private attached = new Set<number>();
   private attaching = new Map<number, Promise<void>>();
   private waiters = new Map<number, Set<Waiter>>();
+  private listeners: CdpListener[] = [];
 
   constructor() {
     browser.debugger.onEvent.addListener((source, method, params) => {
       if (source.tabId === undefined) return;
+      for (const l of this.listeners) l.event?.(source.tabId, method, params);
       for (const w of [...(this.waiters.get(source.tabId) ?? [])]) w.onEvent(method, params);
     });
     browser.debugger.onDetach.addListener((source, reason) => {
       if (source.tabId === undefined) return;
       this.attached.delete(source.tabId);
+      for (const l of this.listeners) l.detached?.(source.tabId);
       for (const w of [...(this.waiters.get(source.tabId) ?? [])]) w.onDetach(reason);
     });
+  }
+
+  subscribe(listener: CdpListener): void {
+    this.listeners.push(listener);
   }
 
   /**
@@ -67,6 +81,8 @@ export class Cdp {
 
   async detach(tabId: number): Promise<void> {
     this.attached.delete(tabId);
+    // Chrome fires onDetach only when it ends the session, not when we do.
+    for (const l of this.listeners) l.detached?.(tabId);
     await browser.debugger.detach({ tabId }).catch(() => {});
   }
 

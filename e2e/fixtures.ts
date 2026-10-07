@@ -111,6 +111,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
       });
       await expect.poll(async () => (await daemon.status()).extension.connected, { timeout: 15_000, message: 'extension never connected' }).toBe(true);
+      // Playwright dismisses every JS dialog that has no listener, the extension's tabs included.
+      // An idle listener leaves them open for handle_dialog, as in a browser nobody automates.
+      ctx.on('dialog', () => {});
       await use(ctx);
       await ctx.close();
     },

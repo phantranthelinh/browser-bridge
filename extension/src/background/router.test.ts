@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RequestFrame } from '../generated/protocol';
+import type { Dialog, RequestFrame } from '../generated/protocol';
 import { BridgeError } from './errors';
 import { createRouter, type Ctx, type Handler } from './router';
 import { SessionStore } from './sessions';
@@ -9,14 +9,14 @@ function frame(action: string, args: unknown = {}, session = 's1'): RequestFrame
   return { type: 'request', id: '7', session, action, args, deadline: Date.now() + 1000 };
 }
 
-function setup(tabUrls: Record<number, string> = {}) {
+function setup(tabUrls: Record<number, string> = {}, dialogs: Record<number, Dialog> = {}) {
   const sessions = new SessionStore(memoryStorage());
   const calls: { action: string; ctx: Ctx; args: unknown }[] = [];
   const ok = (action: string): Handler => async (ctx, args) => {
     calls.push({ action, ctx, args });
     return { action };
   };
-  const names = ['navigate', 'find_tab', 'list_tabs', 'close_tab', 'close_session', 'go_back', 'go_forward', 'reload'] as const;
+  const names = ['navigate', 'find_tab', 'list_tabs', 'close_tab', 'close_session', 'go_back', 'go_forward', 'reload', 'handle_dialog'] as const;
   const handlers: Partial<Record<string, Handler>> = Object.fromEntries(names.map((n) => [n, ok(n)]));
   handlers.snapshot = async () => undefined;
   handlers.click = async () => {
@@ -30,6 +30,7 @@ function setup(tabUrls: Record<number, string> = {}) {
     handlers,
     blockedHosts: () => ['bank.com'],
     tabUrl: async (id) => tabUrls[id],
+    dialog: (id) => dialogs[id],
     makeCtx: (session, deadline) => ({ session, deadline, sessions, blockedHosts: () => ['bank.com'] }),
   });
   return { sessions, calls, route };
@@ -57,10 +58,10 @@ describe('router', () => {
 
   it('reports actions this version does not implement', async () => {
     const { route } = setup();
-    const resp = await route(frame('screenshot'));
+    const resp = await route(frame('cdp'));
     expect(resp.ok).toBe(false);
     expect(resp.error?.code).toBe('INTERNAL');
-    expect(resp.error?.message).toContain('screenshot');
+    expect(resp.error?.message).toContain('cdp');
   });
 
   it('refuses everything but cleanup, navigate and find_tab after the user pressed Cancel', async () => {
@@ -85,6 +86,23 @@ describe('router', () => {
     expect(resp.error?.code).toBe('BLOCKED_HOST');
     expect(JSON.stringify(resp)).not.toContain('bank.com');
     for (const action of ['navigate', 'find_tab', 'go_back', 'go_forward', 'list_tabs', 'close_tab', 'close_session']) {
+      expect((await route(frame(action))).ok, action).toBe(true);
+    }
+  });
+
+  it('refuses everything but handle_dialog and cleanup while a dialog is open', async () => {
+    const { route, sessions } = setup({}, { 5: { type: 'confirm', message: 'Delete everything?' } });
+    await sessions.update('s1', (s) => {
+      s.tabIds = [5];
+      s.currentTabId = 5;
+    });
+    for (const action of ['reload', 'navigate', 'snapshot']) {
+      const resp = await route(frame(action));
+      expect(resp.error?.code, action).toBe('DIALOG_OPEN');
+      expect(resp.error?.message).toContain('confirm');
+      expect(resp.error?.hint).toContain('Delete everything?');
+    }
+    for (const action of ['handle_dialog', 'list_tabs', 'close_tab', 'close_session']) {
       expect((await route(frame(action))).ok, action).toBe(true);
     }
   });

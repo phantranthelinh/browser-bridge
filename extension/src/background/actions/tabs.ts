@@ -9,20 +9,11 @@ import type {
   PageResult,
   TabResult,
 } from '../../generated/protocol';
-import type { Cdp, EventWait } from '../cdp';
-import { BridgeError, blockedHost, noCurrentTab } from '../errors';
+import type { EventWait } from '../cdp';
+import { BridgeError, blockedHost } from '../errors';
 import { hostMatches, httpHost, isBlocked, isRestricted, queryHost } from '../hosts';
-import type { Ctx, Handler } from '../router';
-
-export interface TabCtx extends Ctx {
-  cdp: Cdp;
-}
-
-async function currentTab(ctx: TabCtx): Promise<number> {
-  const s = await ctx.sessions.get(ctx.session);
-  if (s.currentTabId === null) throw noCurrentTab(ctx.session);
-  return s.currentTabId;
-}
+import type { Handler } from '../router';
+import { currentTab, type TabCtx } from './context';
 
 /** Resolves when the main frame finished loading. A back/forward-cache restore fires no load event. */
 function waitForLoad(ctx: TabCtx, tabId: number): EventWait<unknown> {
@@ -145,6 +136,14 @@ const findTab: Handler<TabCtx> = async (ctx, args: FindTabArgs): Promise<FindTab
   );
 };
 
+const activateTab: Handler<TabCtx> = async (ctx): Promise<TabResult> => {
+  const tabId = await currentTab(ctx);
+  const tab = await browser.tabs.update(tabId, { active: true });
+  // The tab only counts as visible when its window is not hidden behind others or minimized.
+  if (tab?.windowId !== undefined) await browser.windows.update(tab.windowId, { focused: true });
+  return { tabId, ...(await settled(ctx, tabId)) };
+};
+
 const listTabs: Handler<TabCtx> = async (ctx): Promise<ListTabsResult> => {
   const s = await ctx.sessions.get(ctx.session);
   const blocked = ctx.blockedHosts();
@@ -227,6 +226,7 @@ const reload: Handler<TabCtx> = async (ctx): Promise<PageResult> => {
 export const tabHandlers = {
   navigate,
   find_tab: findTab,
+  activate_tab: activateTab,
   list_tabs: listTabs,
   close_tab: closeTab,
   close_session: closeSession,

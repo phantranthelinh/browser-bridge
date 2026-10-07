@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Bridge actions page</title>
+  <style>
+    body { font: 16px system-ui; margin: 24px; }
+    section { margin: 12px 0; }
+    .covered-box { position: relative; display: inline-block; }
+    #overlay { position: absolute; inset: -4px; background: rgba(0, 0, 0, 0.2); }
+    .card { cursor: pointer; border: 1px solid #888; padding: 8px; display: inline-block; }
+    .spacer { height: 2000px; }
+  </style>
+</head>
+<body>
+  <h1>Actions page</h1>
+  <p>Some <b>bold</b> text in a paragraph.</p>
+  <p style="display: none">Secret hidden text</p>
+  <p aria-hidden="true">Decoration only</p>
+
+  <section>
+    <label for="name">Name</label> <input id="name">
+    <label for="pw">Password</label> <input id="pw" type="password" value="hunter2">
+    <label for="date">Day</label> <input id="date" type="date">
+  </section>
+  <section>
+    <label for="bio">Bio</label> <textarea id="bio"></textarea>
+    <div id="editor" contenteditable="true" aria-label="Editor"><p>old text</p></div>
+  </section>
+  <section>
+    <label for="color">Color</label>
+    <select id="color">
+      <option value="r">Red</option>
+      <option value="g">Green</option>
+      <option value="b">Blue</option>
+    </select>
+    <output id="color-result"></output>
+    <label for="size">Size</label>
+    <select id="size">
+      <option>Small</option>
+      <option>Huge</option>
+    </select>
+    <label><input id="agree" type="checkbox"> I agree</label>
+    <label class="switch"><input id="notify" type="checkbox" style="display: none"> Notify me</label>
+  </section>
+  <section>
+    <label for="file">Attachment</label> <input id="file" type="file">
+    <output id="file-result"></output>
+    <label for="resume" class="upload-button">Resume</label> <input id="resume" type="file" hidden>
+    <output id="resume-result"></output>
+  </section>
+
+  <section>
+    <button id="go">Go</button> <output id="result"></output>
+    <button class="dup">Dup</button> <button class="dup">Dup</button>
+    <span class="covered-box"><button id="covered">Covered</button><span id="overlay"></span></span>
+    <div class="card" id="card">Clickable card</div>
+  </section>
+
+  <section>
+    <button id="alert">Alert</button>
+    <button id="confirm">Confirm</button>
+    <button id="prompt">Prompt</button>
+    <output id="dialog-result"></output>
+  </section>
+
+  <section>
+    <button id="show-later">Show later</button>
+    <button id="hide-soon">Hide soon</button>
+    <div id="soon-gone">Leaving</div>
+    <button id="remove">Remove</button>
+    <div id="removable"><button id="doomed">Doomed</button></div>
+  </section>
+
+  <section>
+    <form id="search">
+      <input id="q" aria-label="Query">
+    </form>
+    <output id="search-result"></output>
+    <input id="keys" aria-label="Key log">
+    <output id="key-log"></output>
+  </section>
+
+  <section>
+    <button id="fetch">Fetch</button> <output id="fetch-result"></output>
+  </section>
+
+  <table>
+    <tr><th>Plan</th><th>Price</th></tr>
+    <tr><td>Basic</td><td>Free</td></tr>
+  </table>
+
+  <div id="article"></div>
+
+  <iframe src="page2.html" title="Inner page" width="300" height="100"></iframe>
+  <p><a id="to-page2" href="page2.html">Page 2</a></p>
+
+  <div class="spacer"></div>
+  <button id="far">Far away</button>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let clicks = 0;
+    $('#go').addEventListener('click', () => ($('#result').textContent = `clicked ${++clicks}`));
+    $('#card').addEventListener('click', () => ($('#result').textContent = 'card'));
+    $('#far').addEventListener('click', () => ($('#result').textContent = 'far'));
+    $('#color').addEventListener('change', (e) => ($('#color-result').textContent = `color ${e.target.value}`));
+    $('#file').addEventListener('change', (e) => ($('#file-result').textContent = [...e.target.files].map((f) => f.name).join(',')));
+    $('#resume').addEventListener('change', (e) => ($('#resume-result').textContent = e.target.files[0].name));
+    $('#size').addEventListener('change', (e) => {
+      if (e.target.value === 'Huge' && !confirm('Huge costs extra. Sure?')) e.target.value = 'Small';
+    });
+    // A long article: each paragraph is far longer than the 200 characters a snapshot line keeps.
+    for (let i = 1; i <= 30; i++) {
+      const p = document.createElement('p');
+      p.textContent = `Paragraph ${i}. ` + 'Lorem ipsum dolor sit amet. '.repeat(40);
+      $('#article').append(p);
+    }
+    $('#alert').addEventListener('click', () => {
+      alert('Hello from alert');
+      $('#dialog-result').textContent = 'alert closed';
+    });
+    $('#confirm').addEventListener('click', () => ($('#dialog-result').textContent = `confirm ${confirm('Sure?')}`));
+    $('#prompt').addEventListener('click', () => ($('#dialog-result').textContent = `prompt ${prompt('Your name?')}`));
+    $('#show-later').addEventListener('click', () =>
+      setTimeout(() => {
+        const d = document.createElement('div');
+        d.id = 'later';
+        d.textContent = 'Arrived';
+        document.body.append(d);
+      }, 1000),
+    );
+    $('#hide-soon').addEventListener('click', () => setTimeout(() => $('#soon-gone').remove(), 1000));
+    $('#remove').addEventListener('click', () => $('#removable').remove());
+    $('#search').addEventListener('submit', (e) => {
+      e.preventDefault();
+      $('#search-result').textContent = `submitted ${$('#q').value}`;
+    });
+    $('#keys').addEventListener('keydown', (e) => ($('#key-log').textContent += `${e.key}${e.isTrusted ? '' : '(untrusted)'};`));
+    $('#fetch').addEventListener('click', async () => {
+      const r = await fetch('api/data.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"q":1}' });
+      $('#fetch-result').textContent = `fetched ${(await r.json()).message}`;
+    });
+  </script>
+</body>
+</html>

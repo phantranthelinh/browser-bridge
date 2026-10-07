@@ -1,9 +1,16 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { tabHandlers, type TabCtx } from '../background/actions/tabs';
+import type { TabCtx } from '../background/actions/context';
+import { networkHandlers } from '../background/actions/network';
+import { pageHandlers } from '../background/actions/page';
+import { tabHandlers } from '../background/actions/tabs';
 import { Cdp } from '../background/cdp';
 import { Connection } from '../background/connection';
+import { Dialogs } from '../background/dialogs';
 import { CommandLog } from '../background/log';
+import { NetworkCapture } from '../background/network';
+import { PageAgentClient } from '../background/page';
+import { RefCounters } from '../background/refs';
 import { createRouter } from '../background/router';
 import { SessionStore } from '../background/sessions';
 import type { Hello } from '../generated/protocol';
@@ -12,18 +19,25 @@ import { DEFAULT_DAEMON_URL, KEYS } from '../shared/state';
 // Typed as the schema's literal: when the daemon bumps ProtocolVersion, this line stops compiling.
 const PROTOCOL_VERSION: Hello['protocolVersion'] = 2;
 
+const handlers = { ...tabHandlers, ...pageHandlers, ...networkHandlers };
+
 export default defineBackground(() => {
   const sessions = new SessionStore(browser.storage.session);
   const log = new CommandLog(browser.storage.session);
+  const refs = new RefCounters(browser.storage.local);
   const cdp = new Cdp();
   let blockedHosts: string[] = [];
+  const page = new PageAgentClient(cdp, () => blockedHosts);
+  const dialogs = new Dialogs(cdp);
+  const network = new NetworkCapture(cdp, () => blockedHosts);
 
   const route = createRouter<TabCtx>({
     sessions,
-    handlers: tabHandlers,
+    handlers,
     blockedHosts: () => blockedHosts,
     tabUrl: (tabId) => browser.tabs.get(tabId).then((t) => t.url, () => undefined),
-    makeCtx: (session, deadline) => ({ session, deadline, sessions, cdp, blockedHosts: () => blockedHosts }),
+    dialog: (tabId) => dialogs.of(tabId),
+    makeCtx: (session, deadline) => ({ session, deadline, sessions, cdp, page, dialogs, network, refs, blockedHosts: () => blockedHosts }),
   });
 
   const connection = new Connection({
@@ -34,7 +48,7 @@ export default defineBackground(() => {
       extensionVersion: browser.runtime.getManifest().version,
       extensionId: browser.runtime.id,
       browser: navigator.userAgent.includes('Edg/') ? 'edge' : 'chrome',
-      actions: Object.keys(tabHandlers),
+      actions: Object.keys(handlers),
     }),
     onWelcome: (w) => {
       blockedHosts = w.blockedHosts ?? [];
@@ -56,7 +70,10 @@ export default defineBackground(() => {
     },
   });
 
-  browser.tabs.onRemoved.addListener((tabId) => void sessions.forgetTab(tabId));
+  browser.tabs.onRemoved.addListener((tabId) => {
+    void sessions.forgetTab(tabId);
+    void refs.forget(tabId);
+  });
   browser.debugger.onDetach.addListener((source, reason) => {
     if (source.tabId === undefined) return;
     if (reason === 'canceled_by_user') void sessions.stopSessionsOf(source.tabId);
@@ -73,5 +90,6 @@ export default defineBackground(() => {
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
   void sessions.all().then((all) => cdp.restore(Object.values(all).flatMap((s) => [...s.tabIds, ...s.borrowedTabIds])));
+  void browser.tabs.query({}).then((tabs) => refs.keepOnly(tabs.flatMap((t) => (t.id === undefined ? [] : [t.id]))));
   void connection.connect();
 });

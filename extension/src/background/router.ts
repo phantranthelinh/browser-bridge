@@ -1,4 +1,4 @@
-import type { ActionName, RequestFrame, ResponseFrame } from '../generated/protocol';
+import type { ActionName, Dialog, RequestFrame, ResponseFrame } from '../generated/protocol';
 import { BridgeError, blockedHost, toErrorBody } from './errors';
 import { isBlocked } from './hosts';
 import type { SessionStore } from './sessions';
@@ -21,6 +21,7 @@ const CLEANUP = new Set<string>(['list_tabs', 'close_tab', 'close_session']);
 const LEAVES_PAGE = new Set<string>(['navigate', 'find_tab', 'go_back', 'go_forward']);
 // The two actions that resume a session the user stopped with Cancel.
 const RESUMES = new Set<string>(['navigate', 'find_tab']);
+const ANSWERS_DIALOG = 'handle_dialog';
 
 export interface RouterDeps<C extends Ctx> {
   sessions: SessionStore;
@@ -28,6 +29,8 @@ export interface RouterDeps<C extends Ctx> {
   makeCtx(session: string, deadline: number): C;
   tabUrl(tabId: number): Promise<string | undefined>;
   blockedHosts(): readonly string[];
+  /** The JS dialog open in a tab, if any. */
+  dialog(tabId: number): Dialog | undefined;
 }
 
 export function createRouter<C extends Ctx>(deps: RouterDeps<C>): (frame: RequestFrame) => Promise<ResponseFrame> {
@@ -45,6 +48,16 @@ export function createRouter<C extends Ctx>(deps: RouterDeps<C>): (frame: Reques
     }
     if (!CLEANUP.has(action) && !LEAVES_PAGE.has(action) && s.currentTabId !== null) {
       if (isBlocked(await deps.tabUrl(s.currentTabId), deps.blockedHosts())) throw blockedHost();
+    }
+    // An open dialog stops the page's scripts, and with them anything sent to the tab: refused
+    // now, such a command would only time out.
+    const dialog = s.currentTabId === null ? undefined : deps.dialog(s.currentTabId);
+    if (dialog && !CLEANUP.has(action) && action !== ANSWERS_DIALOG) {
+      throw new BridgeError(
+        'DIALOG_OPEN',
+        `the current tab shows a ${dialog.type} dialog`,
+        `Call handle_dialog with accept true or false first. The dialog says: "${dialog.message.slice(0, 200)}"`,
+      );
     }
     return handler(deps.makeCtx(frame.session, frame.deadline), frame.args ?? {});
   }
