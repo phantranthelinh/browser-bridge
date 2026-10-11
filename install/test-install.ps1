@@ -26,8 +26,13 @@ Set-Content -LiteralPath (Join-Path $bridgeHome 'config.json') -Value "{`"addr`"
 # The bridge commands this script runs itself (status, stop) must find the test daemon too.
 $savedHome = $env:BRIDGE_HOME
 $env:BRIDGE_HOME = $bridgeHome
-# The skill goes to a stand-in for ~/.claude, never the real one; Codex counts as not installed.
-$savedClaude, $savedCodex = $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME
+# The skill goes to a stand-in for ~/.claude, never the real one; Codex counts as not installed, and
+# so does Antigravity, which bridge looks for under a stand-in profile folder. That folder is not
+# $bridgeHome: the shells the test starts write their own files into the profile.
+$savedClaude, $savedCodex, $savedProfile = $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME, $env:USERPROFILE
+$profileHome = "$bridgeHome-profile"
+New-Item -ItemType Directory -Path $profileHome | Out-Null
+$env:USERPROFILE = $profileHome
 $claudeHome = Join-Path $bridgeHome 'claude'
 New-Item -ItemType Directory -Path $claudeHome | Out-Null
 $env:CLAUDE_CONFIG_DIR = $claudeHome
@@ -67,6 +72,7 @@ function Test-DaemonUp {
 try {
     Write-Host "== fresh install ($Shell)"
     $output = Invoke-Installer '-NoPath -NoWait'
+    Assert (-not (Test-Path -LiteralPath $skill) -and $output -match 'bridge install-skill --agent claude') 'with no one to ask, no skill is added and the installer says how to add it'
     Assert ($output -match 'Load unpacked') 'with -NoWait and no extension connected, the installer still shows how to load it'
     Assert (Test-Path -LiteralPath $bin) 'bridge.exe is installed'
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $bridgeHome 'extension\manifest.json') | ConvertFrom-Json
@@ -75,14 +81,20 @@ try {
     Assert ($version -eq $manifest.version) "bridge $version matches the extension $($manifest.version)"
     $first = Get-DaemonPid
     Assert ($first -gt 0) "the daemon runs on $addr (pid $first)"
+
+    Write-Host '== reinstall while the daemon runs, choosing the agent'
+    $output = Invoke-Installer '-NoPath -NoWait -Agents claude'
     Assert (Test-Path -LiteralPath $skill) 'the skill is added to Claude Code'
     Assert (-not (Test-Path -LiteralPath $env:CODEX_HOME)) 'nothing is written for Codex, which is not installed'
-
-    Write-Host '== reinstall while the daemon runs'
-    $output = Invoke-Installer '-NoPath -NoWait'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $profileHome '.gemini'))) 'nothing is written for Antigravity, which is not installed'
     $second = Get-DaemonPid
     Assert ($second -gt 0 -and $second -ne $first) "the daemon was replaced (pid $first, then $second)"
     Assert ($output -match 'click Reload' -and $output -notmatch 'Load the extension in Chrome') 'an update asks for Reload, not for loading the extension'
+
+    Write-Host '== an update refreshes the skill where it is, without asking'
+    Set-Content -LiteralPath $skill -Value 'old'
+    Invoke-Installer '-NoPath -NoWait -NoStart' | Out-Null
+    Assert ((Get-Content -Raw -LiteralPath $skill) -notmatch '^old') 'an update refreshes the skill of an agent that has it'
 
     Write-Host '== uninstall keeps files bridge did not create'
     Set-Content -LiteralPath (Join-Path $bridgeHome 'notes.txt') -Value 'not ours'
@@ -103,11 +115,13 @@ try {
     # Cleanup must not throw: that would hide the failure that got us here.
     try {
         if (Test-Path -LiteralPath $bin) { & $bin stop | Out-Null }
-        if (Test-Path -LiteralPath $bridgeHome) { Remove-Item -LiteralPath $bridgeHome -Recurse -Force }
+        foreach ($dir in $bridgeHome, $profileHome) {
+            if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+        }
     } catch {
         Write-Warning "cleanup of $bridgeHome failed: $_"
     }
     $env:BRIDGE_HOME = $savedHome
-    $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME = $savedClaude, $savedCodex
+    $env:CLAUDE_CONFIG_DIR, $env:CODEX_HOME, $env:USERPROFILE = $savedClaude, $savedCodex, $savedProfile
 }
 Write-Host "All installer tests passed ($Shell)." -ForegroundColor Green

@@ -45,11 +45,23 @@ func TestMCPStartsTheDaemonAndServesEveryAction(t *testing.T) {
 	statusPID(t, dir)
 }
 
-func TestInstallSkillWritesOnlyForInstalledAgents(t *testing.T) {
-	claude := t.TempDir()
-	codex := filepath.Join(t.TempDir(), "no-codex")
+// isolateAgents points every agent folder into the test's temp dir, Antigravity's through the
+// home directory since it has no variable of its own. Nothing is installed until a test creates it.
+func isolateAgents(t *testing.T) (claude, codex, antigravity string) {
+	t.Helper()
+	user := t.TempDir()
+	t.Setenv("USERPROFILE", user)
+	t.Setenv("HOME", user)
+	claude = filepath.Join(user, "claude")
+	codex = filepath.Join(user, "no-codex")
 	t.Setenv("CLAUDE_CONFIG_DIR", claude)
 	t.Setenv("CODEX_HOME", codex)
+	return claude, codex, filepath.Join(user, ".gemini", "config")
+}
+
+func TestInstallSkillWritesOnlyForInstalledAgents(t *testing.T) {
+	claude, codex, antigravity := isolateAgents(t)
+	os.MkdirAll(claude, 0o755)
 
 	var out, errOut bytes.Buffer
 	if code := run(context.Background(), []string{"install-skill"}, nil, &out, &errOut); code != 0 {
@@ -66,7 +78,10 @@ func TestInstallSkillWritesOnlyForInstalledAgents(t *testing.T) {
 	if _, err := os.Stat(codex); !os.IsNotExist(err) {
 		t.Error("install-skill created a folder for an agent that is not installed")
 	}
-	for _, want := range []string{"Codex: not installed", "[mcp_servers.browser-bridge]", "claude mcp add browser-bridge"} {
+	if _, err := os.Stat(antigravity); !os.IsNotExist(err) {
+		t.Error("install-skill created a folder for Antigravity, which is not installed")
+	}
+	for _, want := range []string{"Codex: not installed", "Antigravity: not installed", "[mcp_servers.browser-bridge]", "mcp_config.json", "claude mcp add browser-bridge"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -78,6 +93,52 @@ func TestInstallSkillWritesOnlyForInstalledAgents(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(claude, "skills", "browser-bridge")); !os.IsNotExist(err) {
 		t.Error("--remove left the skill behind")
+	}
+}
+
+func TestInstallSkillAgentPicksWhichAgentsGetIt(t *testing.T) {
+	claude, codex, antigravity := isolateAgents(t)
+	for _, dir := range []string{claude, codex, antigravity} {
+		os.MkdirAll(dir, 0o755)
+	}
+	skillIn := func(dir string) bool {
+		_, err := os.Stat(filepath.Join(dir, "skills", "browser-bridge", "SKILL.md"))
+		return err == nil
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run(context.Background(), []string{"install-skill", "--agent", "Antigravity, claude"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if !skillIn(antigravity) || !skillIn(claude) || skillIn(codex) {
+		t.Fatalf("skill in antigravity %v, claude %v, codex %v; want only the first two", skillIn(antigravity), skillIn(claude), skillIn(codex))
+	}
+
+	out.Reset()
+	if code := run(context.Background(), []string{"install-skill", "--list"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("--list: exit %d", code)
+	}
+	for _, want := range []string{"claude\tClaude Code\tskill\t", "codex\tCodex\tinstalled\t", "antigravity\tAntigravity\tskill\t"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("--list lacks %q:\n%s", want, out.String())
+		}
+	}
+
+	if code := run(context.Background(), []string{"install-skill", "--remove", "--agent", "claude"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("remove: exit %d", code)
+	}
+	if skillIn(claude) || !skillIn(antigravity) {
+		t.Error("--remove --agent claude should remove only Claude Code's skill")
+	}
+
+	errOut.Reset()
+	if code := run(context.Background(), []string{"install-skill", "--agent", "cursor"}, nil, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "unknown agent") {
+		t.Errorf("an unknown agent: exit %d, %s", code, errOut.String())
+	}
+	os.RemoveAll(codex)
+	errOut.Reset()
+	if code := run(context.Background(), []string{"install-skill", "--agent", "codex"}, nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "Codex: not installed") {
+		t.Errorf("asking for an agent that is not installed: exit %d, %s", code, errOut.String())
 	}
 }
 

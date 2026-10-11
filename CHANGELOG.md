@@ -4,6 +4,15 @@ All notable changes to browser-bridge. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- Antigravity: `bridge install-skill` adds the skill to `~/.gemini/config/skills/` when Antigravity is installed, and prints its `mcp_config.json` setup.
+- `bridge install-skill --agent claude,codex,antigravity` adds or, with `--remove`, removes the skill for those agents only; `--list` shows which agents are installed and which have the skill.
+
+### Changed
+
+- The installer asks which agents get the skill instead of adding it to every agent it finds, and `-Agents` answers without asking. An update refreshes the skill only where it already is. With no one to ask (a non-interactive shell) it adds none and prints the command to run.
+
 ## [0.3.0] - 2026-10-07
 
 To update, run the install command again: it also adds the skill to Claude Code and Codex. Then click **Reload** on Browser Bridge in `chrome://extensions` to get the snapshot fixes. The protocol did not change, so the 0.2.0 extension keeps working until you do.

@@ -18,6 +18,7 @@ param(
     [switch]$NoPath,
     [switch]$NoWait,
     [switch]$NoSkill,
+    [string[]]$Agents,
     [switch]$Uninstall
 )
 
@@ -53,7 +54,9 @@ Options
   -NoStart     install, but do not start the daemon
   -NoPath      do not add bridge to PATH
   -NoWait      do not wait for the extension to connect
-  -NoSkill     do not add the browser-bridge skill to Claude Code and Codex
+  -Agents a,b  add the browser-bridge skill to these agents without asking:
+               claude, codex, antigravity
+  -NoSkill     do not add the browser-bridge skill to any agent
   -Uninstall   stop the daemon and remove what the installer created
 
 Environment
@@ -136,11 +139,55 @@ function Install-Extension {
     Write-Ok "Extension files in $ExtDir"
 }
 
-# Gives Claude Code and Codex, when installed, the skill that teaches them bridge call.
+# Read-Host fails under -NonInteractive and has no one to ask when input is redirected (a CI runner).
+function Test-Interactive {
+    if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $false }
+    return -not ([Environment]::GetCommandLineArgs() | Where-Object { $_ -like '-noni*' })
+}
+
+# Asks which of the installed agents get the skill and returns their ids.
+function Select-Agents($Candidates) {
+    if (-not $Candidates) {
+        Write-Warn 'No Claude Code, Codex or Antigravity found, so no skill was added. After installing one, run: bridge install-skill --agent <name>'
+        return @()
+    }
+    if (-not (Test-Interactive)) {
+        Write-Warn "No skill added: nobody to ask which agents get it. Run: bridge install-skill --agent $(@($Candidates.Id) -join ',')"
+        return @()
+    }
+    Write-Host ''
+    Write-Host 'Add the browser-bridge skill to which agents?' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Candidates.Count; $i++) { Write-Host "  $($i + 1). $($Candidates[$i].Name)" }
+    while ($true) {
+        $answer = "$(Read-Host 'Numbers separated by commas (Enter: all, 0: none)')".Trim()
+        if (-not $answer) { return @($Candidates.Id) }
+        if ($answer -eq '0') { return @() }
+        $numbers = @($answer -split '[,\s]+' | Where-Object { $_ })
+        if (-not @($numbers | Where-Object { $_ -notmatch '^\d{1,3}$' -or [int]$_ -lt 1 -or [int]$_ -gt $Candidates.Count })) {
+            return @($numbers | ForEach-Object { $Candidates[[int]$_ - 1].Id } | Select-Object -Unique)
+        }
+        Write-Warn "Answer with numbers from 1 to $($Candidates.Count)."
+    }
+}
+
+# Gives the skill that teaches bridge call to the agents named with -Agents; on an update, to the
+# agents that already have it, so the user is not asked again; otherwise to the agents the user picks.
 function Install-Skill {
-    Write-Step 'Adding the browser-bridge skill to the agents on this machine...'
-    & $BinPath install-skill | Out-Host
+    $known = @(& $BinPath install-skill --list | ForEach-Object {
+        $id, $name, $state, $null = $_ -split "`t"
+        [pscustomobject]@{ Id = $id; Name = $name; State = $state }
+    })
+    if ($Agents) {
+        $picked = @($Agents)
+    } else {
+        $picked = @($known | Where-Object { $_.State -eq 'skill' } | ForEach-Object { $_.Id })
+        if (-not $picked) { $picked = @(Select-Agents @($known | Where-Object { $_.State -ne 'missing' })) }
+    }
+    if (-not $picked) { return }
+    Write-Step 'Adding the browser-bridge skill to the agents...'
+    & $BinPath install-skill --agent ($picked -join ',') | Out-Host
     if ($LASTEXITCODE -ne 0) { Write-Warn "bridge install-skill exited with $LASTEXITCODE" }
+    Write-Host '  Change the agents later with: bridge install-skill --agent <names> [--remove]'
 }
 
 function Test-SamePath([string]$A, [string]$B) { return $A.TrimEnd('\') -ieq $B.TrimEnd('\') }

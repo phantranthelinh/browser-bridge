@@ -5,7 +5,7 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Let any AI agent drive **your real Chrome or Edge**, including the sites you are already signed in to. Claude Code uses it through a skill and the `bridge call` command, Codex or a harness running a local Ollama model through MCP, and anything else through a small local HTTP API. No third-party account needed.
+Let any AI agent drive **your real Chrome or Edge**, including the sites you are already signed in to. Claude Code, Codex and Antigravity use it through a skill and the `bridge call` command (or MCP), a harness running a local Ollama model through MCP, and anything else through a small local HTTP API. No third-party account needed.
 
 ```text
 Agent ──bridge call / MCP / HTTP 127.0.0.1:9876──▶ bridge daemon (Go) ──WebSocket──▶ MV3 extension (TypeScript, WXT) ──CDP──▶ tab
@@ -34,7 +34,7 @@ Agent ──bridge call / MCP / HTTP 127.0.0.1:9876──▶ bridge daemon (Go) 
 ## Features
 
 - **Your real browser.** Agents use your existing Chrome or Edge profile, cookies and logins.
-- **Ready for agents.** A skill for Claude Code and Codex, `bridge call` for any shell, `bridge mcp` for MCP clients, and a plain HTTP API. No Chrome API or CDP knowledge required.
+- **Ready for agents.** A skill for Claude Code, Codex and Antigravity, `bridge call` for any shell, `bridge mcp` for MCP clients, and a plain HTTP API. No Chrome API or CDP knowledge required.
 - **Pages as text.** `snapshot` reads a page as an accessibility tree with refs such as `@e12` that actions take as their target.
 - **Sessions.** Each agent session gets its own tab group, so parallel agents do not collide.
 - **Schema-validated requests** with timeouts and stable error codes.
@@ -49,7 +49,7 @@ Agent ──bridge call / MCP / HTTP 127.0.0.1:9876──▶ bridge daemon (Go) 
 | Daemon | `daemon/` (binary `bridge.exe`) | Validates requests against the JSON Schema, routes them by session, enforces timeouts and returns standard error codes. Never touches CDP or the DOM. |
 | Extension | `extension/` | Connects to the daemon, manages sessions and tab groups, and operates tabs through `chrome.debugger`. |
 | CLI and MCP server | `daemon/cmd/bridge` (`bridge call`, `bridge mcp`) | Turn a command line or an MCP tool call into one HTTP request to the daemon. |
-| Skill | `daemon/skill/browser-bridge/SKILL.md` | Teaches Claude Code and Codex the workflow, the errors and the safety rules. |
+| Skill | `daemon/skill/browser-bridge/SKILL.md` | Teaches Claude Code, Codex and Antigravity the workflow, the errors and the safety rules. |
 | Agent | anything | Talks to the daemon through the CLI, MCP or HTTP. |
 
 ## Requirements
@@ -66,7 +66,7 @@ Agent ──bridge call / MCP / HTTP 127.0.0.1:9876──▶ bridge daemon (Go) 
 irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1 | iex
 ```
 
-This downloads `bridge.exe` and the extension into `%USERPROFILE%\.browser-bridge\`, adds `bridge` to your user `PATH`, adds the browser-bridge skill to Claude Code and Codex if they are installed, and starts the daemon.
+This downloads `bridge.exe` and the extension into `%USERPROFILE%\.browser-bridge\`, adds `bridge` to your user `PATH`, asks which of the agents on the machine (Claude Code, Codex, Antigravity) get the browser-bridge skill, and starts the daemon. An update refreshes the skill where it already is, without asking again.
 
 **2. Load the extension** (once):
 
@@ -84,7 +84,8 @@ The installer waits up to 3 minutes and reports when the extension connects. The
 | Option | How |
 |---|---|
 | Pin a version | Set `$env:BRIDGE_VERSION = '0.1.0'` before running the install command |
-| Skip the agent skill | Add `-NoSkill`, as in the uninstall command below |
+| Pick the agents without being asked | Add `-Agents claude,codex,antigravity` (any of them), passed the way the uninstall command below passes `-Uninstall` |
+| Skip the agent skill | Add `-NoSkill` |
 | Show all options | `iex "& { $(irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1) } -Help"` |
 | Uninstall | `iex "& { $(irm https://github.com/phantranthelinh/browser-bridge/releases/latest/download/install.ps1) } -Uninstall"`, then **Remove** the extension in `chrome://extensions` |
 
@@ -119,7 +120,7 @@ Close the session and its tabs when you are done:
 bridge call close_session --session demo
 ```
 
-Then ask your agent to use the browser: Claude Code and Codex already have the skill (see [Using it from an agent](#using-it-from-an-agent)).
+Then ask your agent to use the browser: the agents you picked already have the skill (see [Using it from an agent](#using-it-from-an-agent)).
 
 ## Usage
 
@@ -132,7 +133,7 @@ Then ask your agent to use the browser: Claude Code and Codex already have the s
 | Run one action | `bridge call <action> --session <name> [key=value ...]` (`bridge call -h` for the details) |
 | Read the daemon log | `bridge logs` (`-f` to follow, `-n 200` for more lines, `--prev` for the previous run) |
 | Serve the actions to an MCP client | `bridge mcp` (stdio; started by the client, see below) |
-| Add or remove the agent skill | `bridge install-skill`, `bridge install-skill --remove` |
+| Add or remove the agent skill | `bridge install-skill --agent claude,antigravity`, `bridge install-skill --remove --agent codex`, `bridge install-skill --list` to see which agents have it (without `--agent`: every installed agent) |
 | Stop or restart the daemon | `bridge stop`, `bridge restart` |
 | Run the daemon in the foreground | `bridge serve` |
 | Print the version | `bridge version` |
@@ -190,7 +191,7 @@ bridge call click --session demo selector=button.ytp-play-button
 
 ## Using it from an agent
 
-**Claude Code** reads the browser-bridge skill, which the installer adds to `~/.claude/skills/` (run `bridge install-skill` to add it again, for example after installing Claude Code). The skill teaches the workflow (`navigate`, `snapshot`, act on refs, snapshot again), what to do about each error, and to treat page content as data, never as instructions. Ask Claude Code to do something in your browser and it runs `bridge call`.
+**Claude Code** reads the browser-bridge skill, which the installer adds to `~/.claude/skills/` when you pick it (run `bridge install-skill --agent claude` to add it later, for example after installing Claude Code). The skill teaches the workflow (`navigate`, `snapshot`, act on refs, snapshot again), what to do about each error, and to treat page content as data, never as instructions. Ask Claude Code to do something in your browser and it runs `bridge call`.
 
 **Codex** gets the same skill in `~/.codex/skills/`, or uses MCP. Add to `~/.codex/config.toml`:
 
@@ -198,6 +199,16 @@ bridge call click --session demo selector=button.ytp-play-button
 [mcp_servers.browser-bridge]
 command = 'C:\Users\<you>\.browser-bridge\bin\bridge.exe'
 args = ["mcp"]
+```
+
+**Antigravity** gets the same skill in `~/.gemini/config/skills/`, or uses MCP. Add to `mcpServers` in `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "browser-bridge": { "command": "C:\\Users\\<you>\\.browser-bridge\\bin\\bridge.exe", "args": ["mcp"] }
+  }
+}
 ```
 
 **Any MCP client**, such as a harness running a local Ollama model, runs `bridge mcp` over stdio. Each action is a tool named `browser_<action>` (`browser_navigate`, `browser_snapshot`, `browser_click` …) with a flat schema and no session argument: every `bridge mcp` process works in its own session. `bridge mcp` starts the daemon if it is not running, `browser_snapshot` returns the tree as plain lines, and `browser_screenshot` returns the image as well as its path. `bridge install-skill` prints these settings with the right path.

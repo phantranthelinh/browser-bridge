@@ -29,7 +29,8 @@ const usage = `usage: bridge <command>
   status                       print the daemon status as JSON (exit 1 when not running)
   logs [-f] [-n N] [--prev]    print the end of the daemon log
   mcp                          serve the actions as MCP tools over stdio
-  install-skill [--remove]     add the browser-bridge skill to Claude Code and Codex
+  install-skill [--agent a,b] [--remove] [--list]
+                               add the skill to Claude Code, Codex and/or Antigravity
   serve [--addr host:port]     run the daemon in the foreground
   version                      print the version
   help                         print this help
