@@ -197,7 +197,7 @@ bridge call click --session demo selector=button.ytp-play-button
 
 ```toml
 [mcp_servers.browser-bridge]
-command = 'C:\Users\<you>\.browser-bridge\bin\bridge.exe'
+command = 'bridge'
 args = ["mcp"]
 ```
 
@@ -206,10 +206,12 @@ args = ["mcp"]
 ```json
 {
   "mcpServers": {
-    "browser-bridge": { "command": "C:\\Users\\<you>\\.browser-bridge\\bin\\bridge.exe", "args": ["mcp"] }
+    "browser-bridge": { "command": "bridge", "args": ["mcp"] }
   }
 }
 ```
+
+Both find `bridge` on the `PATH` the installer set, so restart the agent after installing. Installed with `-NoPath`? Put the full path instead, which `bridge install-skill` prints.
 
 **Any MCP client**, such as a harness running a local Ollama model, runs `bridge mcp` over stdio. Each action is a tool named `browser_<action>` (`browser_navigate`, `browser_snapshot`, `browser_click` …) with a flat schema and no session argument: every `bridge mcp` process works in its own session. `bridge mcp` starts the daemon if it is not running, `browser_snapshot` returns the tree as plain lines, and `browser_screenshot` returns the image as well as its path. `bridge install-skill` prints these settings with the right path.
 
