@@ -4,6 +4,10 @@ All notable changes to browser-bridge. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+To update, run the install command again: it keeps the skill on the agents that already have it and asks for no choice. Add Antigravity, or change the agents, with `bridge install-skill --agent <names>`. Then click **Reload** on Browser Bridge in `chrome://extensions`. Only its version number changed and the protocol did not, so the 0.3.0 extension keeps working until you do.
+
 ### Added
 
 - Antigravity: `bridge install-skill` adds the skill to `~/.gemini/config/skills/` when Antigravity is installed, and prints its `mcp_config.json` setup.
@@ -73,7 +77,8 @@ First release.
 - The Chrome and Edge extension: connects to the daemon, keeps each session in its own tab group, and runs the tab actions `navigate`, `find_tab`, `list_tabs`, `close_tab`, `close_session`, `go_back`, `go_forward` and `reload`. Its side panel shows the connection, the sessions and recent commands.
 - The one-line Windows installer, and releases built and tested by GitHub Actions.
 
-[Unreleased]: https://github.com/phantranthelinh/browser-bridge/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/phantranthelinh/browser-bridge/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/phantranthelinh/browser-bridge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/phantranthelinh/browser-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/phantranthelinh/browser-bridge/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/phantranthelinh/browser-bridge/releases/tag/v0.1.0
